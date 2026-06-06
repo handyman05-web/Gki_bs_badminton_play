@@ -135,34 +135,58 @@
             }
 
             if (typeof window !== 'undefined' && window.firebase) {
-              try {
-                if (!window.firebase.apps.length) {
-                  window.firebase.initializeApp(FIREBASE_CONFIG);
-                }
-                const firestoreDb = window.firebase.firestore();
-                setDb(firestoreDb);
-
-                window.firebase.auth().signInAnonymously().then(() => {
-                  showToast("Koneksi Cloud Sinkron Aktif! 🌐", "success");
-                });
-
-                const docRef = firestoreDb.collection('gki_bs_rooms').doc(activeRoomId);
-                docRef.onSnapshot((snapshot) => {
-                  if (snapshot.exists()) {
-                    const data = snapshot.data();
-                    if (data.players) setPlayers(data.players);
-                    if (data.sessions) setSessions(data.sessions);
-                    if (data.transactions) setTransactions(data.transactions);
-                    if (data.matches) setMatches(data.matches);
-                    if (data.tacticalPlayers) setTacticalPlayers(data.tacticalPlayers);
+              const initFirebase = async () => {
+                try {
+                  if (!window.firebase.apps.length) {
+                    window.firebase.initializeApp(FIREBASE_CONFIG);
                   }
-                }, (err) => {
-                  console.log("Firestore sync restricted:", err);
-                });
+                  const auth = window.firebase.auth();
+                  const firestoreDb = window.firebase.firestore();
+                  setDb(firestoreDb);
 
-              } catch (e) {
-                console.warn("Firebase Init Fallback:", e);
-              }
+                  // RULE 3: Autentikasi terlebih dahulu secara sinkron sebelum melakukan kueri database
+                  let user;
+                  if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    const userCredential = await auth.signInWithCustomToken(__initial_auth_token);
+                    user = userCredential.user;
+                  } else {
+                    const userCredential = await auth.signInAnonymously();
+                    user = userCredential.user;
+                  }
+
+                  if (!user) return; // Guard operation
+
+                  showToast("Koneksi Cloud Sinkron Aktif! 🌐", "success");
+
+                  // RULE 1: Menggunakan Path Jalur Ketat yang Diizinkan Firebase
+                  const docRef = firestoreDb
+                    .collection('artifacts')
+                    .doc(APP_ID)
+                    .collection('public')
+                    .doc('data')
+                    .collection('gki_bs_rooms')
+                    .doc(activeRoomId);
+
+                  docRef.onSnapshot((snapshot) => {
+                    if (snapshot.exists()) {
+                      const data = snapshot.data();
+                      if (data.players) setPlayers(data.players);
+                      if (data.sessions) setSessions(data.sessions);
+                      if (data.transactions) setTransactions(data.transactions);
+                      if (data.matches) setMatches(data.matches);
+                      if (data.tacticalPlayers) setTacticalPlayers(data.tacticalPlayers);
+                    }
+                  }, (err) => {
+                    console.error("Firestore sync restricted:", err);
+                  });
+
+                } catch (e) {
+                  console.error("Firebase Init Error:", e);
+                  showToast("Gagal terhubung ke server cloud. ❌", "error");
+                }
+              };
+
+              initFirebase();
             }
           }, []);
 
@@ -188,9 +212,20 @@
             setIsSyncing(true);
             try {
               const payload = { players, sessions, transactions, matches, tacticalPlayers, updatedAt: new Date().toISOString() };
-              await db.collection('gki_bs_rooms').doc(activeRoomId).set(JSON.parse(JSON.stringify(payload)));
+              
+              // RULE 1: Penyimpanan data di jalur aman berizin
+              const docRef = db
+                .collection('artifacts')
+                .doc(APP_ID)
+                .collection('public')
+                .doc('data')
+                .collection('gki_bs_rooms')
+                .doc(activeRoomId);
+
+              await docRef.set(JSON.parse(JSON.stringify(payload)));
               showToast(`Data Sinkron Bersama! Kode Room: #${activeRoomId} 🚀`, "success");
             } catch (err) {
+              console.error(err);
               showToast("Gagal menyimpan ke cloud.", "error");
               exportBackupJson();
             } finally {
@@ -213,7 +248,7 @@
             fileReader.onload = (event) => {
               try {
                 const parsed = JSON.parse(event.target.result);
-                if (parsed.players) setPlayers(parsed.players);
+                if (parsed.players) setPlayers(parsed.parsed.players);
                 if (parsed.sessions) setSessions(parsed.sessions);
                 if (parsed.transactions) setTransactions(parsed.transactions);
                 if (parsed.matches) setMatches(parsed.matches);
