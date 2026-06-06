@@ -137,10 +137,19 @@
           const [diagnosticLogs, setDiagnosticLogs] = useState([]);
           const [firebaseErrorMessage, setFirebaseErrorMessage] = useState('');
 
-          // Proteksi Loop Ganda & Race Condition
-          const [localVersion, setLocalVersion] = useState(0);
-          const lastSyncedVersion = useRef(0);
+          // Modal Konfirmasi Kustom untuk iFrame (Menggantikan confirm)
+          const [confirmModal, setConfirmModal] = useState({
+            isOpen: false,
+            title: '',
+            message: '',
+            onConfirm: null
+          });
+
+          // Proteksi Loop Ganda menggunakan Pelacak Versi Dokumen
+          const localVersion = useRef(1); 
+          const cloudVersion = useRef(0); 
           const isListeningToCloud = useRef(false);
+          const unsubscribeRef = useRef(null);
 
           const addLog = (msg) => {
             const time = new Date().toLocaleTimeString('id-ID');
@@ -153,20 +162,20 @@
             const paramWorkspace = params.get('workspace');
             const activeRoomId = paramWorkspace || 'GKI_BS_DEFAULT_ROOM';
             if (paramWorkspace) {
-              setWorkspaceUrl(paramWorkspace);
+              setWorkspaceUrl(activeRoomId);
             }
 
-            // Batas waktu pemuatan (3 detik). Jika lewat, otomatis fallback ke luring agar aplikasi tetap berjalan lancar
+            // Batas waktu pemuatan (4 detik). Jika lewat, otomatis fallback ke luring agar aplikasi tetap dapat berjalan
             const networkTimeout = setTimeout(() => {
               setCloudStatus(prev => {
                 if (prev === 'pending') {
-                  addLog("⚠️ Koneksi cloud lambat. Mengaktifkan Mode Aman.");
-                  showToast("Berjalan dalam Mode Aman! 💾", "info");
+                  addLog("⚠️ Koneksi cloud lambat. Mengaktifkan Mode Luring.");
+                  showToast("Berjalan dalam Mode Aman Luring! 💾", "info");
                   return 'offline_fallback';
                 }
                 return prev;
               });
-            }, 3000);
+            }, 4000);
 
             if (typeof window !== 'undefined' && window.firebase) {
               const initFirebase = async () => {
@@ -207,28 +216,37 @@
                     .collection('gki_bs_rooms')
                     .doc(activeRoomId);
 
-                  docRef.onSnapshot((snapshot) => {
+                  unsubscribeRef.current = docRef.onSnapshot((snapshot) => {
                     clearTimeout(networkTimeout);
                     if (snapshot.exists()) {
                       const data = snapshot.data();
-                      isListeningToCloud.current = true;
-                      
-                      if (data.players) setPlayers(data.players);
-                      if (data.sessions) setSessions(data.sessions);
-                      if (data.transactions) setTransactions(data.transactions);
-                      if (data.matches) setMatches(data.matches);
-                      if (data.tacticalPlayers) setTacticalPlayers(data.tacticalPlayers);
-                      
-                      setCloudStatus('connected');
-                      addLog(`✅ Sinkronisasi Room #${activeRoomId} Berhasil Dimuat!`);
+                      const remoteVersion = data.version || 0;
 
-                      setTimeout(() => {
-                        isListeningToCloud.current = false;
-                      }, 100);
+                      // Proteksi loop ganda: Hanya terapkan jika versi cloud lebih baru
+                      if (remoteVersion > localVersion.current || localVersion.current === 1) {
+                        isListeningToCloud.current = true;
+                        
+                        if (data.players) setPlayers(data.players);
+                        if (data.sessions) setSessions(data.sessions);
+                        if (data.transactions) setTransactions(data.transactions);
+                        if (data.matches) setMatches(data.matches);
+                        if (data.tacticalPlayers) setTacticalPlayers(data.tacticalPlayers);
+                        
+                        localVersion.current = remoteVersion;
+                        cloudVersion.current = remoteVersion;
+
+                        setCloudStatus('connected');
+                        addLog(`✅ Sinkronisasi Berhasil Dimuat (v${remoteVersion})!`);
+
+                        setTimeout(() => {
+                          isListeningToCloud.current = false;
+                        }, 100);
+                      } else {
+                        addLog(`ℹ️ Mengabaikan update cloud lama (remote: v${remoteVersion}, local: v${localVersion.current})`);
+                      }
                     } else {
-                      addLog(`Room #${activeRoomId} kosong di cloud. Mengunggah data lokal...`);
+                      addLog(`Room #${activeRoomId} kosong di cloud. Mengunggah konfigurasi lokal...`);
                       setCloudStatus('connected');
-                      // Trigger penulisan pertama kali untuk room baru
                       setLocalVersion(v => v + 1);
                     }
                   }, (firestoreError) => {
@@ -253,17 +271,29 @@
               setCloudStatus('offline_fallback');
             }
 
-            return () => clearTimeout(networkTimeout);
+            return () => {
+              clearTimeout(networkTimeout);
+              if (unsubscribeRef.current) unsubscribeRef.current();
+            };
           }, []);
 
           // --- ENGINE AUTO-SYNC INSTAN (Hanya Mengirim Data Jika Ada Perubahan Aksi Nyata) ---
           useEffect(() => {
             if (isListeningToCloud.current) return; // Lindungi agar data cloud tidak tertimpa balik secara sengaja
 
-            if (db && cloudStatus === 'connected' && workspaceUrl && localVersion > lastSyncedVersion.current) {
-              lastSyncedVersion.current = localVersion;
-              const activeRoomId = workspaceUrl;
-              const payload = { players, sessions, transactions, matches, tacticalPlayers, updatedAt: new Date().toISOString() };
+            if (db && cloudStatus === 'connected' && workspaceUrl && localVersion.current > cloudVersion.current) {
+              const targetVersion = localVersion.current;
+              cloudVersion.current = targetVersion; // Eagerly set untuk menghindari pengiriman dobel
+
+              const payload = { 
+                players, 
+                sessions, 
+                transactions, 
+                matches, 
+                tacticalPlayers, 
+                version: targetVersion,
+                updatedAt: new Date().toISOString() 
+              };
               
               const docRef = db
                 .collection('artifacts')
@@ -271,24 +301,37 @@
                 .collection('public')
                 .doc('data')
                 .collection('gki_bs_rooms')
-                .doc(activeRoomId);
+                .doc(workspaceUrl);
 
               docRef.set(JSON.parse(JSON.stringify(payload))).then(() => {
-                addLog(`🔄 Auto-Sync Berhasil Disimpan ke Cloud!`);
+                addLog(`🔄 Auto-Sync Berhasil Disimpan ke Cloud (v${targetVersion})!`);
               }).catch(err => {
                 console.error("Auto-sync error:", err);
                 addLog(`⚠️ Auto-sync tertunda: ${err.message}`);
+                cloudVersion.current = targetVersion - 1; // Rollback agar dapat dicoba lagi
               });
             }
-          }, [localVersion, db, cloudStatus, workspaceUrl]);
+          }, [players, sessions, transactions, matches, tacticalPlayers, db, cloudStatus, workspaceUrl]);
 
           const triggerStateSync = () => {
-            setLocalVersion(v => v + 1);
+            localVersion.current = Math.max(localVersion.current, cloudVersion.current) + 1;
           };
 
           const showToast = (message, type = 'info') => {
             setNotification({ message, type });
             setTimeout(() => setNotification(null), 4000);
+          };
+
+          const openConfirm = (title, message, onConfirm) => {
+            setConfirmModal({
+              isOpen: true,
+              title,
+              message,
+              onConfirm: () => {
+                onConfirm();
+                setConfirmModal(prev => ({ ...prev, isOpen: false }));
+              }
+            });
           };
 
           const publishToCloud = async () => {
@@ -307,7 +350,16 @@
 
             setIsSyncing(true);
             try {
-              const payload = { players, sessions, transactions, matches, tacticalPlayers, updatedAt: new Date().toISOString() };
+              triggerStateSync();
+              const payload = { 
+                players, 
+                sessions, 
+                transactions, 
+                matches, 
+                tacticalPlayers, 
+                version: localVersion.current,
+                updatedAt: new Date().toISOString() 
+              };
               
               const docRef = db
                 .collection('artifacts')
@@ -409,11 +461,15 @@
           };
 
           const removePlayer = (id, name) => {
-            if (confirm(`Hapus ${name}?`)) {
-              setPlayers(prev => prev.filter(p => p.id !== id));
-              showToast("Pemain dihapus.");
-              triggerStateSync();
-            }
+            openConfirm(
+              "Hapus Anggota",
+              `Apakah bapak yakin ingin menghapus ${name} dari daftar anggota inti?`,
+              () => {
+                setPlayers(prev => prev.filter(p => p.id !== id));
+                showToast("Pemain berhasil dihapus.");
+                triggerStateSync();
+              }
+            );
           };
 
           const addTransaction = (e) => {
@@ -436,10 +492,15 @@
           };
 
           const removeTransaction = (id) => {
-            if (confirm("Hapus catatan?")) {
-              setTransactions(prev => prev.filter(t => t.id !== id));
-              triggerStateSync();
-            }
+            openConfirm(
+              "Hapus Catatan Jurnal",
+              "Apakah bapak yakin ingin menghapus catatan transaksi keuangan ini?",
+              () => {
+                setTransactions(prev => prev.filter(t => t.id !== id));
+                showToast("Catatan kas terhapus.");
+                triggerStateSync();
+              }
+            );
           };
 
           const handleRsvpChange = (sessionId, playerId, status) => {
@@ -448,11 +509,15 @@
           };
 
           const resetAllRsvps = (sessionId) => {
-            if (confirm("Reset seluruh status RSVP pemain?")) {
-              setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, rsvps: {} } : s));
-              showToast("RSVP dikosongkan! 🔄", "success");
-              triggerStateSync();
-            }
+            openConfirm(
+              "Kosongkan RSVP Skuad",
+              "Apakah bapak yakin ingin mengosongkan seluruh kehadiran pemain untuk sesi ini?",
+              () => {
+                setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, rsvps: {} } : s));
+                showToast("RSVP dikosongkan! 🔄", "success");
+                triggerStateSync();
+              }
+            );
           };
 
           const saveMatchResult = () => {
@@ -527,9 +592,8 @@
           const handleCanvasMouseMove = (e) => {
             if (!draggingId) return;
             const rect = canvasRef.current.getBoundingClientRect();
-            const x = e.clientX - rect.left, y = e.clientY - top;
+            const x = e.clientX - rect.left, y = e.clientY - rect.top;
             setTacticalPlayers(prev => prev.map(p => p.id === draggingId ? { ...p, x, y } : p));
-            triggerStateSync();
           };
 
           const handleCanvasTouchStart = (e) => {
@@ -551,11 +615,15 @@
               const x = touch.clientX - rect.left;
               const y = touch.clientY - rect.top;
               setTacticalPlayers(prev => prev.map(p => p.id === draggingId ? { ...p, x, y } : p));
-              triggerStateSync();
             }
           };
 
-          const handleCanvasMouseUpOrLeave = () => setDraggingId(null);
+          const handleCanvasMouseUpOrLeave = () => {
+            if (draggingId) {
+              triggerStateSync();
+            }
+            setDraggingId(null);
+          };
 
           return (
             <div className="min-h-screen bg-gray-950 text-gray-100 font-sans antialiased">
@@ -566,6 +634,26 @@
                 </div>
               )}
 
+              {/* MODAL KONFIRMASI KUSTOM (MENGGANTIKAN WINDOW.CONFIRM YANG BERMASALAH DI IFRAME) */}
+              {confirmModal.isOpen && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+                  <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4">
+                    <h3 className="text-base font-black text-white flex items-center gap-2">
+                      <span className="text-amber-500">⚠️</span> {confirmModal.title}
+                    </h3>
+                    <p className="text-xs text-gray-400 leading-relaxed">{confirmModal.message}</p>
+                    <div className="flex gap-2 pt-2">
+                      <button onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))} className="flex-1 py-2 bg-gray-800 text-gray-400 font-bold text-xs rounded-xl hover:bg-gray-750">
+                        Batal
+                      </button>
+                      <button onClick={confirmModal.onConfirm} className="flex-1 py-2 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-xl">
+                        Ya, Lakukan
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <header className="border-b border-gray-800 bg-gray-900/60 backdrop-blur-xl sticky top-0 z-40 px-4">
                 <div className="max-w-7xl mx-auto h-16 flex items-center justify-between flex-wrap gap-2 py-2">
                   <div>
@@ -573,7 +661,7 @@
                     <p className="text-xs text-gray-400">Cloud Sync &amp; Ledger Organizer</p>
                   </div>
                   
-                  {/* Indikator Status Database */}
+                  {/* Indikator Jaringan & Workspace */}
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold ${
                       cloudStatus === 'connected' ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-800/60' :
