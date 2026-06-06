@@ -123,6 +123,753 @@
             { id: 'tp4', label: 'T2-B', x: 225, y: 250, color: '#EF4444' },
           ]);
           const [draggingId, setDraggingId] = useState(null);
+          
+          // State Diagnostik & Telemetri
+          const [db, setDb] = useState(null);
+          const [cloudStatus, setCloudStatus] = useState('pending'); // 'pending', 'connected', 'error_auth', 'error_firestore'
+          const [diagnosticLogs, setDiagnosticLogs] = useState([]);
+          const [firebaseErrorMessage, setFirebaseErrorMessage] = useState('');
+
+          const addLog = (msg) => {
+            const time = new Date().toLocaleTimeString('id-ID');
+            setDiagnosticLogs(prev => [...prev, `[${time}] ${msg}`]);
+          };
+
+          // --- ENGINE SINKRONISASI CLOUD ---
+          useEffect(() => {
+            const params = new URLSearchParams(window.location.search);
+            const paramWorkspace = params.get('workspace');
+            const activeRoomId = paramWorkspace || 'GKI_BS_DEFAULT_ROOM';
+            if (paramWorkspace) {
+              setWorkspaceUrl(paramWorkspace);
+            }
+
+            if (typeof window !== 'undefined' && window.firebase) {
+              const initFirebase = async () => {
+                try {
+                  addLog("Menghubungkan ke layanan Firebase...");
+                  if (!window.firebase.apps.length) {
+                    window.firebase.initializeApp(FIREBASE_CONFIG);
+                  }
+                  const auth = window.firebase.auth();
+                  const firestoreDb = window.firebase.firestore();
+                  setDb(firestoreDb);
+
+                  addLog("Mencoba proses Autentikasi Anonim...");
+                  let userCredential;
+                  try {
+                    userCredential = await auth.signInAnonymously();
+                    addLog(`Autentikasi Anonim Sukses! UID: ${userCredential.user.uid}`);
+                  } catch (authError) {
+                    setCloudStatus('error_auth');
+                    setFirebaseErrorMessage(authError.message);
+                    addLog(`❌ ERROR AUTENTIKASI: ${authError.message}`);
+                    addLog("👉 Solusi: Buka Firebase Console > Authentication > Sign-in Method, lalu AKTIFKAN (Enable) 'Anonymous'.");
+                    return;
+                  }
+
+                  const user = userCredential.user;
+                  if (!user) return;
+
+                  addLog(`Menghubungkan pendengar data untuk Room Workspace: #${activeRoomId}...`);
+                  
+                  // Menggunakan Path Jalur Aman Sesuai Aturan Firebase
+                  const docRef = firestoreDb
+                    .collection('artifacts')
+                    .doc(APP_ID)
+                    .collection('public')
+                    .doc('data')
+                    .collection('gki_bs_rooms')
+                    .doc(activeRoomId);
+
+                  docRef.onSnapshot((snapshot) => {
+                    if (snapshot.exists()) {
+                      const data = snapshot.data();
+                      if (data.players) setPlayers(data.players);
+                      if (data.sessions) setSessions(data.sessions);
+                      if (data.transactions) setTransactions(data.transactions);
+                      if (data.matches) setMatches(data.matches);
+                      if (data.tacticalPlayers) setTacticalPlayers(data.tacticalPlayers);
+                      setCloudStatus('connected');
+                      addLog(`✅ Sinkronisasi Room #${activeRoomId} Berhasil Dimuat!`);
+                    } else {
+                      addLog(`Room #${activeRoomId} kosong di cloud. Siap membuat data baru.`);
+                      setCloudStatus('connected');
+                    }
+                  }, (firestoreError) => {
+                    setCloudStatus('error_firestore');
+                    setFirebaseErrorMessage(firestoreError.message);
+                    addLog(`❌ ERROR FIRESTORE: ${firestoreError.message}`);
+                    addLog("👉 Solusi: Periksa setelan Firestore Security Rules Anda. Pastikan sudah diatur ke 'Test Mode' atau mengizinkan akses tulis/baca.");
+                  });
+
+                } catch (e) {
+                  setCloudStatus('error_firestore');
+                  setFirebaseErrorMessage(e.message);
+                  addLog(`❌ KRITIKAL ERROR: ${e.message}`);
+                }
+              };
+
+              initFirebase();
+            } else {
+              addLog("⚠️ SDK Firebase gagal dimuat di browser.");
+              setCloudStatus('error_firestore');
+            }
+          }, []);
+
+          const showToast = (message, type = 'info') => {
+            setNotification({ message, type });
+            setTimeout(() => setNotification(null), 4000);
+          };
+
+          const publishToCloud = async () => {
+            const activeRoomId = workspaceUrl || Math.random().toString(36).substring(2, 8).toUpperCase();
+            if (!workspaceUrl) {
+              setWorkspaceUrl(activeRoomId);
+              const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + `?workspace=${activeRoomId}`;
+              window.history.replaceState({ path: newUrl }, '', newUrl);
+            }
+
+            if (!db || cloudStatus !== 'connected') {
+              showToast("Cloud Belum Terhubung! File backup JSON diunduh lokal. 💾", "info");
+              exportBackupJson();
+              return;
+            }
+
+            setIsSyncing(true);
+            try {
+              const payload = { players, sessions, transactions, matches, tacticalPlayers, updatedAt: new Date().toISOString() };
+              
+              const docRef = db
+                .collection('artifacts')
+                .doc(APP_ID)
+                .collection('public')
+                .doc('data')
+                .collection('gki_bs_rooms')
+                .doc(activeRoomId);
+
+              await docRef.set(JSON.parse(JSON.stringify(payload)));
+              showToast(`Data Tersimpan & Sinkron ke Room: #${activeRoomId}! 🚀`, "success");
+              addLog(`Data manual disinkronkan ke cloud untuk Room #${activeRoomId}`);
+            } catch (err) {
+              console.error(err);
+              showToast("Gagal menyimpan ke cloud.", "error");
+              exportBackupJson();
+            } finally {
+              setIsSyncing(false);
+            }
+          };
+
+          const exportBackupJson = () => {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ players, sessions, transactions, matches }, null, 2));
+            const downloadAnchor = document.createElement('a');
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", `gki_bs_backup.json`);
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+          };
+
+          const importBackupJson = (e) => {
+            const fileReader = new FileReader();
+            fileReader.onload = (event) => {
+              try {
+                const parsed = JSON.parse(event.target.result);
+                if (parsed.players) setPlayers(parsed.players);
+                if (parsed.sessions) setSessions(parsed.sessions);
+                if (parsed.transactions) setTransactions(parsed.transactions);
+                if (parsed.matches) setMatches(parsed.matches);
+                showToast("Data Impor Berhasil! ✅", "success");
+              } catch (err) {
+                showToast("Format Berkas Salah! ❌", "error");
+              }
+            };
+            if (e.target.files[0]) fileReader.readAsText(e.target.files[0]);
+          };
+
+          const totalUangMasuk = transactions.filter(t => t.type === 'credit').reduce((sum, t) => sum + t.amount, 0);
+          const totalUangKeluar = transactions.filter(t => t.type === 'debit').reduce((sum, t) => sum + t.amount, 0);
+          const saldoKas = totalUangMasuk - totalUangKeluar;
+
+          const incrementCheck = (id) => setPlayers(prev => prev.map(p => p.id === id ? { ...p, checks: p.checks + 1 } : p));
+          const decrementCheck = (id) => setPlayers(prev => prev.map(p => p.id === id && p.checks > 0 ? { ...p, checks: p.checks - 1 } : p));
+
+          const addNewPlayer = (e) => {
+            e.preventDefault();
+            if (!newPlayerName.trim()) return;
+            const isMonthly = newPlayerType === 'monthly';
+            const newP = {
+              id: 'p_' + Date.now(),
+              name: newPlayerName.trim(),
+              type: newPlayerType,
+              fee: isMonthly ? 100000 : 25000,
+              checks: Number(newPlayerChecks) || 0,
+              stats: { played: 0, won: 0, lost: 0 }
+            };
+            setPlayers(prev => [...prev, newP]);
+            setNewPlayerName('');
+            setNewPlayerChecks(0);
+            showToast(`${newP.name} Terdaftar!`, "success");
+          };
+
+          const handleQuickAddGuest = (sessionId, e) => {
+            e.preventDefault();
+            if (!guestName.trim()) return;
+            const newGuestId = 'p_guest_' + Date.now();
+            const newGuest = {
+              id: newGuestId,
+              name: guestName.trim() + " (Tamu)",
+              type: guestType,
+              fee: guestType === 'monthly' ? 100000 : 25000,
+              checks: 0,
+              stats: { played: 0, won: 0, lost: 0 }
+            };
+            setPlayers(prev => [...prev, newGuest]);
+            setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, rsvps: { ...s.rsvps, [newGuestId]: 'YES' } } : s));
+            setGuestName('');
+            showToast(`${newGuest.name} Ditambahkan ke RSVP! ✅`, "success");
+          };
+
+          const removePlayer = (id, name) => {
+            if (confirm(`Hapus ${name}?`)) {
+              setPlayers(prev => prev.filter(p => p.id !== id));
+              showToast("Pemain dihapus.");
+            }
+          };
+
+          const addTransaction = (e) => {
+            e.preventDefault();
+            const parsedAmount = parseFloat(txAmount);
+            if (isNaN(parsedAmount) || parsedAmount <= 0 || !txDesc.trim()) { showToast("Input tidak valid!", "error"); return; }
+            let finalDesc = txDesc;
+            if (txType === 'credit' && txPlayerId) {
+              const p = players.find(x => x.id === txPlayerId);
+              if (p) { finalDesc = `Bayar Iuran - ${p.name}: ${txDesc}`; incrementCheck(txPlayerId); }
+            }
+            const newTx = {
+              id: 't_' + Date.now(), type: txType, amount: parsedAmount, description: finalDesc,
+              date: new Date().toISOString().slice(0,10), note: txType === 'credit' ? 'Uang Masuk / Iuran' : 'Uang Keluar / Biaya'
+            };
+            setTransactions(prev => [newTx, ...prev]);
+            setTxAmount(''); setTxDesc(''); setTxPlayerId('');
+            showToast("Transaksi Masuk Jurnal! 💰", "success");
+          };
+
+          const removeTransaction = (id) => { if (confirm("Hapus catatan?")) setTransactions(prev => prev.filter(t => t.id !== id)); };
+
+          const handleRsvpChange = (sessionId, playerId, status) => {
+            setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, rsvps: { ...s.rsvps, [playerId]: status } } : s));
+          };
+
+          const resetAllRsvps = (sessionId) => {
+            if (confirm("Reset seluruh status RSVP pemain?")) {
+              setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, rsvps: {} } : s));
+              showToast("RSVP dikosongkan! 🔄", "success");
+            }
+          };
+
+          const saveMatchResult = () => {
+            if (!dPlayer1 || !dPlayer2 || !dPlayer3 || !dPlayer4 || scoreA === scoreB) { showToast("Konfigurasi skor/pemain salah!", "error"); return; }
+            const nameA1 = players.find(p => p.id === dPlayer1)?.name || 'Pemain A1';
+            const nameA2 = players.find(p => p.id === dPlayer2)?.name || 'Pemain A2';
+            const nameB1 = players.find(p => p.id === dPlayer3)?.name || 'Pemain B1';
+            const nameB2 = players.find(p => p.id === dPlayer4)?.name || 'Pemain B2';
+            const newMatch = { id: 'm_' + Date.now(), team1: [nameA1, nameA2], team2: [nameB1, nameB2], score1: scoreA, score2: scoreB, date: new Date().toISOString().slice(0, 10) };
+            const winningTeam = scoreA > scoreB ? 'team1' : 'team2';
+            const activePlayerIds = [dPlayer1, dPlayer2, dPlayer3, dPlayer4];
+            setPlayers(prev => prev.map(p => {
+              if (activePlayerIds.includes(p.id)) {
+                const isTeam1 = p.id === dPlayer1 || p.id === dPlayer2;
+                const won = (isTeam1 && winningTeam === 'team1') || (!isTeam1 && winningTeam === 'team2');
+                return { ...p, stats: { played: (p.stats?.played || 0) + 1, won: (p.stats?.won || 0) + (won ? 1 : 0), lost: (p.stats?.lost || 0) + (won ? 0 : 1) } };
+              }
+              return p;
+            }));
+            setMatches(prev => [newMatch, ...prev]); showToast("Hasil Game Disimpan! 🏆", "success"); setScoreA(0); setScoreB(0);
+          };
+
+          const copyKeuanganWhatsApp = () => {
+            const playerLines = players.map(p => `${p.name} ${"✅".repeat(p.checks)} ${p.type === 'monthly' ? "payment monthly rp 100000" : "payment per play Rp25.000,."}`).join('\n');
+            const template = `Selamat pagi Bapak" Badminton, update keuangan Badminton hari ini :\n${playerLines}\n*Total Iuran Rp ${totalUangMasuk.toLocaleString('id-ID')},.*\n\n*Saldo Kas Badminton Rp ${saldoKas.toLocaleString('id-ID')},.*\n( Uang masuk Rp ${totalUangMasuk.toLocaleString('id-ID')},.  -  Uang keluar ${totalUangKeluar.toLocaleString('id-ID')} )`;
+            copyTextToClipboard(template);
+          };
+
+          const copyRsvpWhatsApp = (session) => {
+            const yesList = [], noList = [], maybeList = [], blankList = [];
+            players.forEach(p => {
+              const s = session.rsvps?.[p.id] || 'NO_RESPONSE';
+              if (s === 'YES') yesList.push(p.name);
+              else if (s === 'NO') noList.push(p.name);
+              else if (s === 'MAYBE') maybeList.push(p.name);
+              else blankList.push(p.name);
+            });
+            const template = `🏸 *GKI-BS Badminton Play RSVP* 🏸\n*Jadwal:* ${session.date} | ${session.time}\n*Tempat:* ${session.location} (${session.court})\n\n*Daftar Hadir (${yesList.length}):*\n${yesList.map((n,i)=>`${i+1}. ${n} ✅`).join('\n')}\n\n*Belum Konfirmasi:* ${blankList.join(', ')}`;
+            copyTextToClipboard(template);
+          };
+
+          const copyTextToClipboard = (text) => {
+            const el = document.createElement("textarea"); el.value = text; el.style.position = "fixed"; document.body.appendChild(el);
+            el.focus(); el.select(); document.execCommand('copy'); document.body.removeChild(el);
+            showToast("Format Teks Tersalin ke Clipboard! 📲", "success");
+          };
+
+          useEffect(() => { if (activeTab === 'tactical') redrawCanvas(); }, [activeTab, tacticalPlayers]);
+
+          const redrawCanvas = () => {
+            const cv = canvasRef.current; if (!cv) return;
+            const ctx = cv.getContext('2d'); ctx.fillStyle = '#065F46'; ctx.fillRect(0, 0, cv.width, cv.height);
+            ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 3; ctx.strokeRect(15, 15, cv.width - 30, cv.height - 30);
+            ctx.beginPath(); ctx.moveTo(15, cv.height / 2); ctx.lineTo(cv.width - 15, cv.height / 2); ctx.stroke();
+            tacticalPlayers.forEach(p => {
+              ctx.beginPath(); ctx.arc(p.x, p.y, 16, 0, Math.PI * 2); ctx.fillStyle = p.color; ctx.fill(); ctx.strokeStyle = '#FFFFFF'; ctx.stroke();
+              ctx.fillStyle = '#FFFFFF'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(p.label, p.x, p.y);
+            });
+          };
+
+          const handleCanvasMouseDown = (e) => {
+            const rect = canvasRef.current.getBoundingClientRect();
+            const x = e.clientX - rect.left, y = e.clientY - rect.top;
+            const match = tacticalPlayers.find(p => Math.hypot(p.x - x, p.y - y) < 20);
+            if (match) setDraggingId(match.id);
+          };
+
+          const handleCanvasMouseMove = (e) => {
+            if (!draggingId) return;
+            const rect = canvasRef.current.getBoundingClientRect();
+            const x = e.clientX - rect.left, y = e.clientY - rect.top;
+            setTacticalPlayers(prev => prev.map(p => p.id === draggingId ? { ...p, x, y } : p));
+          };
+
+          const handleCanvasMouseUpOrLeave = () => setDraggingId(null);
+
+          return (
+            <div className="min-h-screen bg-gray-950 text-gray-100 font-sans antialiased">
+              {notification && (
+                <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 px-5 py-3 rounded-xl bg-emerald-950/90 border border-emerald-500 text-emerald-200 shadow-2xl flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <p className="text-sm font-semibold">{notification.message}</p>
+                </div>
+              )}
+
+              <header className="border-b border-gray-800 bg-gray-900/60 backdrop-blur-xl sticky top-0 z-40 px-4">
+                <div className="max-w-7xl mx-auto h-16 flex items-center justify-between">
+                  <div>
+                    <h1 className="text-lg font-bold bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent">GKI-BS Badminton Play</h1>
+                    <p className="text-xs text-gray-400">Cloud Sync &amp; Ledger Organizer</p>
+                  </div>
+                  
+                  {/* Status Koneksi */}
+                  <div className="flex items-center gap-3">
+                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${
+                      cloudStatus === 'connected' ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-800/60' :
+                      cloudStatus === 'pending' ? 'bg-amber-950/80 text-amber-400 border border-amber-800/60 animate-pulse' :
+                      'bg-red-950/80 text-red-400 border border-red-800/60'
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${
+                        cloudStatus === 'connected' ? 'bg-emerald-400' :
+                        cloudStatus === 'pending' ? 'bg-amber-400' :
+                        'bg-red-400'
+                      }`} />
+                      {cloudStatus === 'connected' ? `Terkoneksi Workspace: #${workspaceUrl || 'Lokal'}` :
+                       cloudStatus === 'pending' ? 'Menghubungkan Jaringan...' :
+                       'Cloud Terputus ❌'}
+                    </span>
+                    <button onClick={publishToCloud} className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-gray-950 text-xs font-bold rounded-xl transition-all">
+                      Sync &amp; Ambil Link WhatsApp
+                    </button>
+                  </div>
+                </div>
+              </header>
+
+              {/* PANEL DIAGNOSTIK UTAMA (AKAN MUNCUL BILA TERJADI ERROR SINKRONISASI) */}
+              {cloudStatus !== 'connected' && cloudStatus !== 'pending' && (
+                <div className="max-w-7xl mx-auto mt-4 mx-4 p-5 bg-red-950/30 border border-red-500/30 rounded-3xl text-sm text-red-200">
+                  <h3 className="font-bold text-base mb-2">🚨 Pusat Deteksi Masalah &amp; Solusi Cloud Sync</h3>
+                  <p className="text-xs text-gray-300 mb-3">Sistem mendeteksi bahwa aplikasi gagal mendaftarkan data ke server Firebase Anda. Berikut riwayat laporan kegagalan untuk diperbaiki:</p>
+                  
+                  <div className="bg-black/40 p-3 rounded-xl font-mono text-xs text-red-400 mb-4 border border-red-900/40">
+                    <strong>Pesan Kegagalan:</strong> {firebaseErrorMessage || "Izin dibatasi atau Authentication mati."}
+                  </div>
+
+                  <h4 className="font-bold text-xs uppercase tracking-wider text-white mb-2">Panduan Langkah Solusi Cepat:</h4>
+                  <ol className="list-decimal pl-4 space-y-2 text-xs text-gray-300">
+                    <li>
+                      <strong>Aktifkan Akses Anonim:</strong> Buka tab <a href="https://console.firebase.google.com/" target="_blank" className="text-emerald-400 underline font-bold">Firebase Console Anda</a>, masuk ke menu <strong>Authentication</strong> > klik <strong>Sign-in method</strong> > klik <strong>Anonymous</strong>, lalu aktifkan opsi tersebut dan simpan.
+                    </li>
+                    <li>
+                      <strong>Atur Aturan Database (Firestore Rules):</strong> Buka menu <strong>Firestore Database</strong> > pilih tab <strong>Rules</strong>, lalu pastikan aturannya mengizinkan baca-tulis selama fase tes, contoh:
+                      <pre className="bg-black/30 p-2 rounded mt-1 overflow-x-auto text-blue-300 font-mono">allow read, write: if true;</pre>
+                    </li>
+                    <li>
+                      <strong>Segarkan Halaman (Refresh):</strong> Setelah mengubah setelan di atas pada Firebase Console, segarkan halaman browser ini.
+                    </li>
+                  </ol>
+                </div>
+              )}
+
+              <section className="bg-gradient-to-b from-gray-900 to-gray-950 py-6 px-4 border-b border-gray-900">
+                <div className="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-gray-900/40 border border-gray-800 p-4 rounded-2xl"><span className="text-xs text-gray-400 block mb-1">Saldo Kas</span><span className="text-xl font-black text-emerald-400">Rp {saldoKas.toLocaleString('id-ID')}</span></div>
+                  <div className="bg-gray-900/40 border border-gray-800 p-4 rounded-2xl"><span className="text-xs text-gray-400 block mb-1">Uang Masuk</span><span className="text-xl font-black text-gray-200">Rp {totalUangMasuk.toLocaleString('id-ID')}</span></div>
+                  <div className="bg-gray-900/40 border border-gray-800 p-4 rounded-2xl"><span className="text-xs text-gray-400 block mb-1">Uang Keluar</span><span className="text-xl font-black text-red-400">Rp {totalUangKeluar.toLocaleString('id-ID')}</span></div>
+                  <div className="bg-gray-900/40 border border-gray-800 p-4 rounded-2xl"><span className="text-xs text-gray-400 block mb-1">Total Roster</span><span className="text-xl font-black text-teal-400">{players.length} Pemain</span></div>
+                </div>
+              </section>
+
+              <nav className="max-w-7xl mx-auto px-4 my-6">
+                <div className="bg-gray-900 p-1.5 rounded-2xl flex flex-wrap gap-1">
+                  <button onClick={() => setActiveTab('dashboard')} className={`flex-1 py-2 rounded-xl text-xs font-bold ${activeTab === 'dashboard' ? 'bg-emerald-500 text-gray-950' : 'text-gray-400'}`}>🗓️ Sparing &amp; RSVP</button>
+                  <button onClick={() => setActiveTab('players')} className={`flex-1 py-2 rounded-xl text-xs font-bold ${activeTab === 'players' ? 'bg-emerald-500 text-gray-950' : 'text-gray-400'}`}>👥 Anggota</button>
+                  <button onClick={() => setActiveTab('matchmaker')} className={`flex-1 py-2 rounded-xl text-xs font-bold ${activeTab === 'matchmaker' ? 'bg-emerald-500 text-gray-950' : 'text-gray-400'}`}>🔥 Scoreboard</button>
+                  <button onClick={() => setActiveTab('ledger')} className={`flex-1 py-2 rounded-xl text-xs font-bold ${activeTab === 'ledger' ? 'bg-emerald-500 text-gray-950' : 'text-gray-400'}`}>💰 Buku Kas</button>
+                  <button onClick={() => setActiveTab('tactical')} className={`flex-1 py-2 rounded-xl text-xs font-bold ${activeTab === 'tactical' ? 'bg-emerald-500 text-gray-950' : 'text-gray-400'}`}>📋 Papan Taktik</button>
+                </div>
+              </nav>
+
+              <main className="max-w-7xl mx-auto px-4 pb-20">
+                {activeTab === 'dashboard' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div className="lg:col-span-2 space-y-6">
+                      {sessions.map(s => {
+                        const playersYes = players.filter(p => s.rsvps?.[p.id] === 'YES');
+                        const playersMaybe = players.filter(p => s.rsvps?.[p.id] === 'MAYBE');
+                        const playersNo = players.filter(p => s.rsvps?.[p.id] === 'NO');
+                        const playersNoResponse = players.filter(p => !s.rsvps?.[p.id] || s.rsvps?.[p.id] === 'NO_RESPONSE');
+
+                        const totalWillCome = playersYes.length;
+                        const requiresMoreCourts = totalWillCome > 8;
+                        const calculatedCourtsNeeded = Math.max(1, Math.ceil(totalWillCome / 8));
+
+                        return (
+                          <div key={s.id} className="bg-gray-900 border border-gray-800 rounded-3xl p-6 shadow-xl space-y-6">
+                            <div className="flex justify-between border-b border-gray-800 pb-4 mb-4 flex-wrap gap-2">
+                              <div>
+                                <span className="text-xs font-bold text-emerald-400 uppercase">Next Match</span>
+                                <h3 className="text-lg font-bold text-white">{s.location} - {s.court}</h3>
+                                <p className="text-xs text-gray-400">{s.date} | {s.time} WIB</p>
+                              </div>
+                              <div className="flex gap-2 items-center">
+                                <button onClick={() => resetAllRsvps(s.id)} className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-xs font-bold rounded-lg">🔄 Reset</button>
+                                <button onClick={() => copyRsvpWhatsApp(s)} className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold rounded-lg">Salin List WA 📲</button>
+                              </div>
+                            </div>
+
+                            {/* PANEL LIVE ANALISIS ALOKASI LAPANGAN */}
+                            <div className={`p-4 rounded-2xl border text-sm transition-all ${
+                              requiresMoreCourts 
+                                ? 'bg-amber-950/40 border-amber-500/40 text-amber-200' 
+                                : 'bg-emerald-950/20 border-emerald-800/60 text-emerald-300'
+                            }`}>
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="text-base">{requiresMoreCourts ? '⚠️' : '✅'}</span>
+                                <span className="font-bold uppercase tracking-wide text-xs">Analisis Kebutuhan Lapangan (Live)</span>
+                              </div>
+                              <p className="text-xs text-gray-300">
+                                Total pemain konfirmasi ikut: <strong className="text-white text-sm">{totalWillCome}</strong> orang. 
+                                {requiresMoreCourts 
+                                  ? ` Karena sudah lebih dari 8 pemain, idealnya membutuhkan ${calculatedCourtsNeeded} Lapangan agar tidak terlalu lama mengantre.`
+                                  : ` Kapasitas memadai. 1 Lapangan cukup untuk maksimal bermain bergiliran.`
+                                }
+                              </p>
+                              <div className="mt-2 text-xs font-mono font-bold bg-black/30 px-3 py-1.5 rounded-lg inline-block">
+                                Rekomendasi Pengurus: {calculatedCourtsNeeded} Lapangan Aktif
+                              </div>
+                            </div>
+
+                            {/* Rincian Nama Berdasarkan Status */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-gray-950/40 p-4 rounded-2xl border border-gray-800 text-xs">
+                              <div className="space-y-1">
+                                <span className="text-emerald-400 font-bold block">🟢 IKUT ({playersYes.length})</span>
+                                <p className="text-gray-400 leading-relaxed">{playersYes.map(p => p.name).join(', ') || '-'}</p>
+                              </div>
+                              <div className="space-y-1 border-t md:border-t-0 md:border-x border-gray-800 md:px-3">
+                                <span className="text-yellow-400 font-bold block">🟡 RAGU ({playersMaybe.length})</span>
+                                <p className="text-gray-400 leading-relaxed">{playersMaybe.map(p => p.name).join(', ') || '-'}</p>
+                              </div>
+                              <div className="space-y-1 border-t md:border-t-0 border-gray-800">
+                                <span className="text-red-400 font-bold block">🔴 ABSEN ({playersNo.length})</span>
+                                <p className="text-gray-400 leading-relaxed">{playersNo.map(p => p.name).join(', ') || '-'}</p>
+                              </div>
+                            </div>
+
+                            {/* Quick Guest Form */}
+                            <div className="bg-gray-950/60 p-4 rounded-xl border border-gray-800">
+                              <h4 className="text-xs font-bold text-emerald-400 mb-2">➕ Tambah Tamu / Pemain Tambahan Cepat</h4>
+                              <form onSubmit={(e) => handleQuickAddGuest(s.id, e)} className="flex gap-2">
+                                <input type="text" value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="Nama Tamu" className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 text-xs flex-1 text-white focus:outline-none" />
+                                <select value={guestType} onChange={(e) => setGuestType(e.target.value)} className="bg-gray-900 border border-gray-800 rounded-lg px-2 text-xs text-white focus:outline-none">
+                                  <option value="per_play">Per Main (25k)</option>
+                                  <option value="monthly">Bulanan (100k)</option>
+                                </select>
+                                <button type="submit" className="px-3 bg-emerald-500 text-gray-950 font-bold text-xs rounded-lg">Ikut ✅</button>
+                              </form>
+                            </div>
+
+                            {/* RSVP Selector List */}
+                            <div className="space-y-2 border-t border-gray-800/60 pt-4">
+                              <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Ubah Status Mandiri Skuad:</h4>
+                              {players.map(p => {
+                                const status = s.rsvps?.[p.id] || 'NO_RESPONSE';
+                                return (
+                                  <div key={p.id} className="flex justify-between items-center p-2.5 bg-gray-950/40 rounded-xl">
+                                    <span className="text-sm font-bold text-white">{p.name}</span>
+                                    <div className="flex gap-1">
+                                      <button onClick={() => handleRsvpChange(s.id, p.id, 'YES')} className={`px-2 py-1 text-xs font-bold rounded ${status === 'YES' ? 'bg-emerald-500 text-gray-950' : 'bg-gray-800 text-gray-400'}`}>Ikut</button>
+                                      <button onClick={() => handleRsvpChange(s.id, p.id, 'MAYBE')} className={`px-2 py-1 text-xs font-bold rounded ${status === 'MAYBE' ? 'bg-yellow-500 text-gray-950' : 'bg-gray-800 text-gray-400'}`}>Ragu</button>
+                                      <button onClick={() => handleRsvpChange(s.id, p.id, 'NO')} className={`px-2 py-1 text-xs font-bold rounded ${status === 'NO' ? 'bg-red-500 text-gray-950' : 'bg-gray-800 text-gray-400'}`}>Absen</button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="space-y-6">
+                      <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl space-y-4">
+                        <button onClick={copyKeuanganWhatsApp} className="w-full py-3 bg-teal-500 hover:bg-teal-400 text-gray-950 font-bold text-xs rounded-xl shadow">Salin Buku Keuangan WA 📲</button>
+                        <input type="file" accept=".json" onChange={importBackupJson} className="w-full text-xs text-gray-500" />
+                        
+                        {/* Riwayat Konsol Log Telemetri Database */}
+                        <div className="mt-4 p-4 bg-black/60 rounded-2xl border border-gray-800 text-[10px] font-mono h-32 overflow-y-auto space-y-1">
+                          <div className="text-emerald-400 font-bold border-b border-gray-800 pb-1 mb-1">Riwayat Jaringan Cloud</div>
+                          {diagnosticLogs.map((log, index) => (
+                            <div key={index} className="text-gray-400">{log}</div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'players' && (
+                  <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 shadow-xl">
+                    <form onSubmit={addNewPlayer} className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 items-end">
+                      <input type="text" value={newPlayerName} onChange={(e) => setNewPlayerName(e.target.value)} placeholder="Nama Anggota Inti" className="bg-gray-950 border border-gray-800 p-2 text-sm rounded-xl text-white focus:outline-none" />
+                      <select value={newPlayerType} onChange={(e) => setNewPlayerType(e.target.value)} className="bg-gray-950 border border-gray-800 p-2 text-sm rounded-xl text-white">
+                        <option value="monthly">Bulanan Flat (100k)</option>
+                        <option value="per_play">Per Play (25k)</option>
+                      </select>
+                      <button type="submit" className="py-2 bg-emerald-500 text-gray-950 font-bold rounded-xl text-sm">Daftarkan Pemain</button>
+                    </form>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left">
+                        <thead><tr className="bg-gray-950 text-xs text-gray-400 uppercase"><th className="p-4">Nama</th><th className="p-4">Jenis</th><th className="p-4">Checkmarks</th><th className="p-4">Total Kas</th><th className="p-4 text-center">Aksi</th></tr></thead>
+                        <tbody className="divide-y divide-gray-800">
+                          {players.map(p => (
+                            <tr key={p.id}>
+                              <td className="p-4 font-bold text-white">{p.name}</td>
+                              <td className="p-4 text-xs">{p.type === 'monthly' ? 'Bulanan' : 'Per Main'}</td>
+                              <td className="p-4">{"✅".repeat(p.checks) || "Belum Bayar"}</td>
+                              <td className="p-4 text-emerald-400 font-bold">Rp {(p.type === 'monthly' ? p.checks * 100000 : p.checks * 25000).toLocaleString('id-ID')}</td>
+                              <td className="p-4 flex justify-center gap-2">
+                                <button onClick={() => incrementCheck(p.id)} className="w-8 h-8 rounded bg-emerald-950 text-emerald-400 font-bold">+✅</button>
+                                <button onClick={() => decrementCheck(p.id)} className="w-8 h-8 rounded bg-red-950 text-red-400 font-bold">-✅</button>
+                                <button onClick={() => removePlayer(p.id, p.name)} className="w-8 h-8 rounded bg-gray-950 text-gray-500">🗑️</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'matchmaker' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl space-y-4">
+                      <h3 className="text-lg font-bold text-white">Lineup Ganda</h3>
+                      <select value={dPlayer1} onChange={(e) => setDPlayer1(e.target.value)} className="w-full bg-gray-950 border border-gray-800 p-2.5 text-sm rounded-xl text-white focus:outline-none"><option value="">Pemain A1</option>{players.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+                      <select value={dPlayer2} onChange={(e) => setDPlayer2(e.target.value)} className="w-full bg-gray-950 border border-gray-800 p-2.5 text-sm rounded-xl text-white focus:outline-none"><option value="">Pemain A2</option>{players.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+                      <select value={dPlayer3} onChange={(e) => setDPlayer3(e.target.value)} className="w-full bg-gray-950 border border-gray-800 p-2.5 text-sm rounded-xl text-white focus:outline-none"><option value="">Pemain B1</option>{players.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+                      <select value={dPlayer4} onChange={(e) => setDPlayer4(e.target.value)} className="w-full bg-gray-950 border border-gray-800 p-2.5 text-sm rounded-xl text-white focus:outline-none"><option value="">Pemain B2</option>{players.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+                    </div>
+
+                    {/* INTERACTIVE SCOREBOARD WITH PLUS AND MINUS OPTIONS */}
+                    <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl text-center flex flex-col justify-between">
+                      <div>
+                        <h3 className="text-lg font-bold text-white">Papan Poin Live 21</h3>
+                        <p className="text-[11px] text-gray-400 mt-0.5">Gunakan tombol + dan - untuk merubah nilai skor pertandingan</p>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-4 my-6">
+                        {/* SCORE TEAM A */}
+                        <div className="bg-indigo-950/40 p-3 rounded-2xl border border-indigo-900/60 flex flex-col items-center">
+                          <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mb-2">TIM A</span>
+                          <div className="text-4xl font-black text-white py-2">{scoreA}</div>
+                          <div className="flex gap-2 w-full mt-2">
+                            <button onClick={() => setScoreA(prev => Math.max(0, prev - 1))} className="flex-1 py-1 rounded bg-gray-800 hover:bg-gray-700 font-bold text-sm text-gray-300 transition-all">-</button>
+                            <button onClick={() => setScoreA(prev => prev + 1)} className="flex-1 py-1 rounded bg-indigo-600 hover:bg-indigo-500 font-bold text-sm text-white transition-all">+</button>
+                          </div>
+                        </div>
+
+                        {/* SCORE TEAM B */}
+                        <div className="bg-red-950/40 p-3 rounded-2xl border border-red-900/60 flex flex-col items-center">
+                          <span className="text-[10px] font-bold text-red-400 uppercase tracking-wider mb-2">TIM B</span>
+                          <div className="text-4xl font-black text-white py-2">{scoreB}</div>
+                          <div className="flex gap-2 w-full mt-2">
+                            <button onClick={() => setScoreB(prev => Math.max(0, prev - 1))} className="flex-1 py-1 rounded bg-gray-800 hover:bg-gray-700 font-bold text-sm text-gray-300 transition-all">-</button>
+                            <button onClick={() => setScoreB(prev => prev + 1)} className="flex-1 py-1 rounded bg-red-600 hover:bg-red-500 font-bold text-sm text-white transition-all">+</button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <button onClick={saveMatchResult} className="w-full py-2.5 bg-emerald-500 font-bold text-gray-950 text-sm rounded-xl shadow-lg shadow-emerald-500/10">Simpan &amp; Log Riwayat Game</button>
+                        <button onClick={() => { setScoreA(0); setScoreB(0); }} className="w-full py-1.5 bg-gray-800 text-xs font-bold text-red-400 rounded-lg">Reset Score ke 0-0</button>
+                      </div>
+                    </div>
+
+                    <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl max-h-[300px] overflow-y-auto">
+                      <h3 className="text-sm font-bold text-gray-400 uppercase mb-2">Win Rate Skuad</h3>
+                      {players.map(p => (
+                        <div key={p.id} className="flex justify-between py-1.5 border-b border-gray-800 text-xs">
+                          <span className="font-semibold">{p.name}</span>
+                          <span className="text-emerald-400 font-bold">{p.stats?.played ? Math.round((p.stats.won / p.stats.played) * 100) : 0}% WR</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'ledger' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl h-fit">
+                      <form onSubmit={addTransaction} className="space-y-4">
+                        <div className="grid grid-cols-2 gap-2">
+                          <button type="button" onClick={() => setTxType('credit')} className="py-1.5 rounded-lg text-xs font-bold border border-emerald-500 text-emerald-400">Iuran IN</button>
+                          <button type="button" onClick={() => setTxType('debit')} className="py-1.5 rounded-lg text-xs font-bold border border-gray-800 text-gray-400">Biaya OUT</button>
+                        </div>
+                        <input type="number" value={txAmount} onChange={(e) => setTxAmount(e.target.value)} placeholder="Jumlah Rp" className="w-full bg-gray-950 border border-gray-800 p-2.5 text-xs text-white rounded-xl" />
+                        <input type="text" value={txDesc} onChange={(e) => setTxDesc(e.target.value)} placeholder="Keterangan Nota" className="w-full bg-gray-950 border border-gray-800 p-2.5 text-xs text-white rounded-xl" />
+                        <button type="submit" className="w-full py-2.5 bg-emerald-500 text-gray-950 font-bold text-xs rounded-xl">Simpan Jurnal Kas</button>
+                      </form>
+                    </div>
+                    <div className="lg:col-span-2 space-y-3 max-h-[500px] overflow-y-auto">
+                      {transactions.map(t => (
+                        <div key={t.id} className="p-4 bg-gray-900 border border-gray-800 rounded-xl flex justify-between items-center">
+                          <div><span className="text-sm font-bold text-white block">{t.description}</span><span className="text-[10px] text-gray-400">{t.date}</span></div>
+                          <div className="flex items-center gap-2">
+                            <span className={`text-sm font-black ${t.type === 'credit' ? 'text-emerald-400' : 'text-red-400'}`}>Rp {t.amount.toLocaleString('id-ID')}</span>
+                            <button onClick={() => removeTransaction(t.id)} className="text-red-500 text-xs px-1">✕</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'tactical' && (
+                  <div className="flex flex-col lg:flex-row gap-6 bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl items-center justify-center">
+                    <div className="w-full lg:w-1/3 space-y-2">
+                      <h3 className="text-base font-bold text-white">Strategi Court Planner</h3>
+                      <p className="text-xs text-gray-400">Geser titik lingkaran pemain untuk menyusun pola tanding tim ganda secara visual.</p>
+                      <button onClick={redrawCanvas} className="w-full mt-4 py-2 bg-red-950 border border-red-900 text-red-400 font-bold text-xs rounded-xl">Bersihkan Coretan Lapangan 🧹</button>
+                    </div>
+                    <canvas ref={canvasRef} width="300" height="400" onMouseDown={handleCanvasMouseDown} onMouseMove={handleCanvasMouseMove} onMouseUp={handleCanvasMouseUpOrLeave} onMouseLeave={handleCanvasMouseUpOrLeave} className="border border-gray-800 rounded-2xl bg-emerald-950 touch-none shadow-2xl cursor-crosshair" />
+                  </div>
+                )}
+              </main>
+            </div>
+          );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
+          apiKey: "AIzaSyAKWV_5Y9gWh7_Mp33YeTYS-v0kGGO0K0s",
+          authDomain: "gki-bs-badminton-play.firebaseapp.com",
+          projectId: "gki-bs-badminton-play",
+          storageBucket: "gki-bs-badminton-play.firebasestorage.app",
+          messagingSenderId: "496261059958",
+          appId: "1:496261059958:web:8b58e42f05dbc24fd3d657",
+          measurementId: "G-VFEJCT46PF"
+        };
+
+        const INITIAL_PLAYERS = [
+          { id: 'p1', name: 'Pak T. H. Hutagalung', type: 'monthly', fee: 100000, checks: 3, stats: { played: 12, won: 8, lost: 4 } },
+          { id: 'p2', name: 'Pak W. Napitupulu', type: 'monthly', fee: 100000, checks: 2, stats: { played: 8, won: 5, lost: 3 } },
+          { id: 'p3', name: 'Pak Handi Muliawan', type: 'monthly', fee: 100000, checks: 3, stats: { played: 14, won: 10, lost: 4 } },
+          { id: 'p4', name: 'Pak Veky Pamintu', type: 'monthly', fee: 100000, checks: 2, stats: { played: 6, won: 3, lost: 3 } },
+          { id: 'p5', name: 'Pak N. Sitohang', type: 'monthly', fee: 100000, checks: 6, stats: { played: 20, won: 13, lost: 7 } },
+          { id: 'p6', name: 'Pak M.V. Sitinjak', type: 'monthly', fee: 100000, checks: 2, stats: { played: 10, won: 4, lost: 6 } },
+          { id: 'p7', name: 'Pak Jeff Ma', type: 'monthly', fee: 100000, checks: 3, stats: { played: 11, won: 7, lost: 4 } },
+          { id: 'p8', name: 'Pak R.Tambunan', type: 'monthly', fee: 100000, checks: 3, stats: { played: 15, won: 9, lost: 6 } },
+          { id: 'p9', name: 'Pak G.Sagala', type: 'monthly', fee: 100000, checks: 4, stats: { played: 16, won: 11, lost: 5 } },
+          { id: 'p10', name: 'Pak M.F.Gultom', type: 'monthly', fee: 100000, checks: 2, stats: { played: 9, won: 4, lost: 5 } },
+          { id: 'p11', name: 'Pak E.Sitorus', type: 'per_play', fee: 25000, checks: 7, stats: { played: 18, won: 10, lost: 8 } },
+          { id: 'p12', name: 'Pak J. Siagian', type: 'per_play', fee: 25000, checks: 1, stats: { played: 4, won: 1, lost: 3 } },
+          { id: 'p13', name: 'Pak F. Tripika', type: 'per_play', fee: 25000, checks: 2, stats: { played: 8, won: 5, lost: 3 } },
+          { id: 'p14', name: 'Pak H. Sihotang', type: 'per_play', fee: 25000, checks: 1, stats: { played: 3, won: 1, lost: 2 } }
+        ];
+
+        const INITIAL_TRANSACTIONS = [
+          { id: 't1', type: 'credit', amount: 3325000, description: "Iuran kumulatif seluruh anggota (Hutagalung dkk)", date: "2026-06-02", note: "Saldo Kas Terkumpul" },
+          { id: 't2', type: 'debit', amount: 3026000, description: "Uang keluar (Sewa Lapangan, Kok, Konsumsi)", date: "2026-06-02", note: "Total Biaya Pengeluaran Sebelumnya" }
+        ];
+
+        const INITIAL_SESSIONS = [
+          {
+            id: 's1',
+            date: '2026-06-08',
+            day: 'Senin',
+            location: 'Axton Arena MB2',
+            court: 'Court 3',
+            time: '19:00 - 21:00',
+            courtCost: DEFAULT_COURT_COST_PER_HOUR * 2,
+            shuttlecockCost: DEFAULT_SHUTTLECOCK_COST_PER_PACK,
+            rsvps: {} 
+          }
+        ];
+
+        function App() {
+          const [activeTab, setActiveTab] = useState('dashboard');
+          const [players, setPlayers] = useState(INITIAL_PLAYERS);
+          const [sessions, setSessions] = useState(INITIAL_SESSIONS);
+          const [transactions, setTransactions] = useState(INITIAL_TRANSACTIONS);
+          const [matches, setMatches] = useState([
+            { id: 'm1', team1: ['Pak T. H. Hutagalung', 'Pak Handi Muliawan'], team2: ['Pak N. Sitohang', 'Pak G.Sagala'], score1: 21, score2: 18, date: '2026-06-02' }
+          ]);
+          
+          // Form State
+          const [newPlayerName, setNewPlayerName] = useState('');
+          const [newPlayerType, setNewPlayerType] = useState('monthly');
+          const [newPlayerChecks, setNewPlayerChecks] = useState(0);
+          const [guestName, setGuestName] = useState('');
+          const [guestType, setGuestType] = useState('per_play');
+          const [txType, setTxType] = useState('credit');
+          const [txAmount, setTxAmount] = useState('');
+          const [txDesc, setTxDesc] = useState('');
+          const [txPlayerId, setTxPlayerId] = useState('');
+          const [schDate, setSchDate] = useState('2026-06-15');
+          const [schLocation, setSchLocation] = useState('Axton Arena MB2');
+          const [schCourt, setSchCourt] = useState('Court 3');
+          const [schTime, setSchTime] = useState('19:00 - 21:00');
+          
+          // Scoreboard Live State
+          const [dPlayer1, setDPlayer1] = useState('');
+          const [dPlayer2, setDPlayer2] = useState('');
+          const [dPlayer3, setDPlayer3] = useState('');
+          const [dPlayer4, setDPlayer4] = useState('');
+          const [scoreA, setScoreA] = useState(0);
+          const [scoreB, setScoreB] = useState(0);
+
+          const [notification, setNotification] = useState(null);
+          const [isSyncing, setIsSyncing] = useState(false);
+          const [workspaceUrl, setWorkspaceUrl] = useState('');
+
+          const canvasRef = useRef(null);
+          const [tacticalPlayers, setTacticalPlayers] = useState([
+            { id: 'tp1', label: 'T1-A', x: 75, y: 150, color: '#3B82F6' },
+            { id: 'tp2', label: 'T1-B', x: 75, y: 250, color: '#3B82F6' },
+            { id: 'tp3', label: 'T2-A', x: 225, y: 150, color: '#EF4444' },
+            { id: 'tp4', label: 'T2-B', x: 225, y: 250, color: '#EF4444' },
+          ]);
+          const [draggingId, setDraggingId] = useState(null);
           const [db, setDb] = useState(null);
 
           // --- ENGINE SINKRONISASI CLOUD ---
