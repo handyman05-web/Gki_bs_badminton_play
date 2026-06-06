@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GKI-BS Badminton Play</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js" crossorigin></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js" crossorigin></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.3/babel.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+</head>
+<body class="bg-gray-950 text-gray-100 font-sans antialiased min-h-screen">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        // --- KONFIGURASI DATABASE LOCK ---
+        const APP_ID = 'gki-bs-badminton';
+        const DEFAULT_COURT_COST_PER_HOUR = 55000;
+        const DEFAULT_SHUTTLECOCK_COST_PER_PACK = 145000;
+        // Kredensial Firebase Proyek Anda
+        const FIREBASE_CONFIG = {
+          apiKey: "AIzaSyAKWV_5Y9gWh7_Mp33YeTYS-v0kGGO0K0s",
+          authDomain: "gki-bs-badminton-play.firebaseapp.com",
+          projectId: "gki-bs-badminton-play",
+          storageBucket: "gki-bs-badminton-play.firebasestorage.app",
+          messagingSenderId: "496261059958",
+          appId: "1:496261059958:web:8b58e42f05dbc24fd3d657",
+          measurementId: "G-VFEJCT46PF"
+        };
+        const MOCK_SLIP_PLACEHOLDER = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='400' viewBox='0 0 300 400'><rect width='300' height='400' fill='%23111827'/><circle cx='150' cy='120' r='40' fill='%2310B981' fill-opacity='0.2'/><text x='150' y='190' fill='%23FFFFFF' font-size='16' font-weight='bold' text-anchor='middle'>TRANSFER BERHASIL</text><text x='150' y='215' fill='%239CA3AF' font-size='12' text-anchor='middle'>GKI-BS Badminton Play</text><line x1='30' y1='240' x2='270' y2='240' stroke='%23374151' stroke-dasharray='5,5'/><text x='40' y='270' fill='%239CA3AF' font-size='12'>Jumlah</text><text x='260' y='270' fill='%2310B981' font-size='14' font-weight='bold' text-anchor='end'>Rp 100.000</text><text x='40' y='300' fill='%239CA3AF' font-size='12'>Metode</text><text x='260' y='300' fill='%23F3F4F6' font-size='12' text-anchor='end'>Transfer Bank (Digital)</text><text x='150' y='360' fill='%234B5563' font-size='10' text-anchor='middle'>GKI-BS Auto-Generated Proof</text></svg>";
+        const INITIAL_PLAYERS = [
+          { id: 'p1', name: 'Pak T. H. Hutagalung', type: 'monthly', fee: 100000, checks: 3, stats: { played: 12, won: 8, lost: 4 } },
+          { id: 'p2', name: 'Pak W. Napitupulu', type: 'monthly', fee: 100000, checks: 2, stats: { played: 8, won: 5, lost: 3 } },
+          { id: 'p3', name: 'Pak Handi Muliawan', type: 'monthly', fee: 100000, checks: 3, stats: { played: 14, won: 10, lost: 4 } },
+          { id: 'p4', name: 'Pak Veky Pamintu', type: 'monthly', fee: 100000, checks: 2, stats: { played: 6, won: 3, lost: 3 } },
+          { id: 'p5', name: 'Pak N. Sitohang', type: 'monthly', fee: 100000, checks: 6, stats: { played: 20, won: 13, lost: 7 } },
+          { id: 'p6', name: 'Pak M.V. Sitinjak', type: 'monthly', fee: 100000, checks: 2, stats: { played: 10, won: 4, lost: 6 } },
+          { id: 'p7', name: 'Pak Jeff Ma', type: 'monthly', fee: 100000, checks: 3, stats: { played: 11, won: 7, lost: 4 } },
+          { id: 'p8', name: 'Pak R.Tambunan', type: 'monthly', fee: 100000, checks: 3, stats: { played: 15, won: 9, lost: 6 } },
+          { id: 'p9', name: 'Pak G.Sagala', type: 'monthly', fee: 100000, checks: 4, stats: { played: 16, won: 11, lost: 5 } },
+          { id: 'p10', name: 'Pak M.F.Gultom', type: 'monthly', fee: 100000, checks: 2, stats: { played: 9, won: 4, lost: 5 } },
+          { id: 'p11', name: 'Pak E.Sitorus', type: 'per_play', fee: 25000, checks: 7, stats: { played: 18, won: 10, lost: 8 } },
+          { id: 'p12', name: 'Pak J. Siagian', type: 'per_play', fee: 25000, checks: 1, stats: { played: 4, won: 1, lost: 3 } },
+          { id: 'p13', name: 'Pak F. Tripika', type: 'per_play', fee: 25000, checks: 2, stats: { played: 8, won: 5, lost: 3 } },
+          { id: 'p14', name: 'Pak H. Sihotang', type: 'per_play', fee: 25000, checks: 1, stats: { played: 3, won: 1, lost: 2 } }
+        ];
+        const INITIAL_TRANSACTIONS = [
+          { id: 't1', type: 'credit', amount: 3325000, description: "Iuran kumulatif seluruh anggota (Hutagalung dkk)", date: "2026-06-02", note: "Saldo Kas Terkumpul", slip: "" },
+          { id: 't2', type: 'debit', amount: 3026000, description: "Uang keluar (Sewa Lapangan, Kok, Konsumsi)", date: "2026-06-02", note: "Total Biaya Pengeluaran Sebelumnya", slip: "" }
+        ];
+        const INITIAL_SESSIONS = [
+          {
+            id: 's1',
+            date: '2026-06-08',
+            day: 'Senin',
+            location: 'Axton Arena MB2',
+            court: 'Court 3',
+            time: '19:00 - 21:00',
+            courtCost: DEFAULT_COURT_COST_PER_HOUR * 2,
+            shuttlecockCost: DEFAULT_SHUTTLECOCK_COST_PER_PACK,
+            rsvps: {} 
+          }
+        ];
+        function App() {
+          const [activeTab, setActiveTab] = useState('dashboard');
+          const [players, setPlayers] = useState(INITIAL_PLAYERS);
+          const [sessions, setSessions] = useState(INITIAL_SESSIONS);
+          const [transactions, setTransactions] = useState(INITIAL_TRANSACTIONS);
+          const [matches, setMatches] = useState([
+            { id: 'm1', team1: ['Pak T. H. Hutagalung', 'Pak Handi Muliawan'], team2: ['Pak N. Sitohang', 'Pak G.Sagala'], score1: 21, score2: 18, date: '2026-06-02' }
+          ]);
+          
+          const [newPlayerName, setNewPlayerName] = useState('');
+          const [newPlayerType, setNewPlayerType] = useState('monthly');
+          const [newPlayerChecks, setNewPlayerChecks] = useState(0);
+          const [guestName, setGuestName] = useState('');
+          const [guestType, setGuestType] = useState('per_play');
+          const [txType, setTxType] = useState('credit');
+          const [txAmount, setTxAmount] = useState('');
+          const [txDesc, setTxDesc] = useState('');
+          const [txPlayerId, setTxPlayerId] = useState('');
+          const [txSlip, setTxSlip] = useState('');
+          const [schDate, setSchDate] = useState('2026-06-15');
+          const [schLocation, setSchLocation] = useState('Axton Arena MB2');
+          const [schCourt, setSchCourt] = useState('Court 3');
+          const [schTime, setSchTime] = useState('19:00 - 21:00');
+          
+          const [dPlayer1, setDPlayer1] = useState('');
+          const [dPlayer2, setDPlayer2] = useState('');
+          const [dPlayer3, setDPlayer3] = useState('');
+          const [dPlayer4, setDPlayer4] = useState('');
+          const [scoreA, setScoreA] = useState(0);
+          const [scoreB, setScoreB] = useState(0);
+          const [notification, setNotification] = useState(null);
+          const [selectedSlip, setSelectedSlip] = useState(null);
+          const [isSyncing, setIsSyncing] = useState(false);
+          const [workspaceUrl, setWorkspaceUrl] = useState('');
+          const canvasRef = useRef(null);
+          const [canvasColor, setCanvasColor] = useState('#10B981');
+          const [canvasBrushSize, setCanvasBrushSize] = useState(3);
+          const [isDrawing, setIsDrawing] = useState(false);
+          const [tacticalPlayers, setTacticalPlayers] = useState([
+            { id: 'tp1', label: 'T1-A', x: 75, y: 150, color: '#3B82F6' },
+            { id: 'tp2', label: 'T1-B', x: 75, y: 250, color: '#3B82F6' },
+            { id: 'tp3', label: 'T2-A', x: 225, y: 150, color: '#EF4444' },
+            { id: 'tp4', label: 'T2-B', x: 225, y: 250, color: '#EF4444' },
+          ]);
+          const [draggingId, setDraggingId] = useState(null);
+          const [db, setDb] = useState(null);
+          useEffect(() => {
+            const params = new URLSearchParams(window.location.search);
+            const paramWorkspace = params.get('workspace');
+            const activeRoomId = paramWorkspace || 'GKI_BS_DEFAULT_ROOM';
+            if (paramWorkspace) {
+              setWorkspaceUrl(paramWorkspace);
+            }
+            if (typeof window !== 'undefined' && window.firebase) {
+              try {
+                if (!window.firebase.apps.length) {
+                  window.firebase.initializeApp(FIREBASE_CONFIG);
+                }
+                const firestoreDb = window.firebase.firestore();
+                setDb(firestoreDb);
+                window.firebase.auth().signInAnonymously().then(() => {
+                  showToast("Koneksi Cloud Sinkron Aktif! 🌐", "success");
+                });
+                const docRef = firestoreDb.collection('gki_bs_rooms').doc(activeRoomId);
+                docRef.onSnapshot((snapshot) => {
+                  if (snapshot.exists()) {
+                    const data = snapshot.data();
+                    if (data.players) setPlayers(data.players);
+                    if (data.sessions) setSessions(data.sessions);
+                    if (data.transactions) setTransactions(data.transactions);
+                    if (data.matches) setMatches(data.matches);
+                    if (data.tacticalPlayers) setTacticalPlayers(data.tacticalPlayers);
+                  }
+                }, (err) => {
+                  console.log("Firestore sync restricted:", err);
+                });
+              } catch (e) {
+                console.warn("Firebase Init Fallback:", e);
+              }
+            }
+          }, []);
+          const showToast = (message, type = 'info') => {
+            setNotification({ message, type });
+            setTimeout(() => setNotification(null), 4000);
+          };
+          const publishToCloud = async () => {
+            const activeRoomId = workspaceUrl || Math.random().toString(36).substring(2, 8).toUpperCase();
+            if (!workspaceUrl) {
+              setWorkspaceUrl(activeRoomId);
+              const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + `?workspace=${activeRoomId}`;
+              window.history.replaceState({ path: newUrl }, '', newUrl);
+            }
+            if (!db) {
+              showToast("Mode Offline: Mengunduh Backup Data Berkas JSON! 💾", "info");
+              exportBackupJson();
+              return;
+            }
+            setIsSyncing(true);
+            try {
+              const payload = { players, sessions, transactions, matches, tacticalPlayers, updatedAt: new Date().toISOString() };
+              await db.collection('gki_bs_rooms').doc(activeRoomId).set(JSON.parse(JSON.stringify(payload)));
+              showToast(`Data Sinkron! Tautan Terbentuk untuk Room #${activeRoomId} 🚀`, "success");
+            } catch (err) {
+              showToast("Gagal menyimpan ke cloud.", "error");
+              exportBackupJson();
+            } finally {
+              setIsSyncing(false);
+            }
+          };
+          const exportBackupJson = () => {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ players, sessions, transactions, matches }, null, 2));
+            const downloadAnchor = document.createElement('a');
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", `gki_bs_backup.json`);
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+          };
+          const importBackupJson = (e) => {
+            const fileReader = new FileReader();
+            fileReader.onload = (event) => {
+              try {
+                const parsed = JSON.parse(event.target.result);
+                if (parsed.players) setPlayers(parsed.players);
+                if (parsed.sessions) setSessions(parsed.sessions);
+                if (parsed.transactions) setTransactions(parsed.transactions);
+                if (parsed.matches) setMatches(parsed.matches);
+                showToast("Data Impor Berhasil! ✅", "success");
+              } catch (err) {
+                showToast("Format Berkas Salah! ❌", "error");
+              }
+            };
+            if (e.target.files[0]) fileReader.readAsText(e.target.files[0]);
+          };
+          const totalUangMasuk = transactions.filter(t => t.type === 'credit').reduce((sum, t) => sum + t.amount, 0);
+          const totalUangKeluar = transactions.filter(t => t.type === 'debit').reduce((sum, t) => sum + t.amount, 0);
+          const saldoKas = totalUangMasuk - totalUangKeluar;
+          const incrementCheck = (id) => setPlayers(prev => prev.map(p => p.id === id ? { ...p, checks: p.checks + 1 } : p));
+          const decrementCheck = (id) => setPlayers(prev => prev.map(p => p.id === id && p.checks > 0 ? { ...p, checks: p.checks - 1 } : p));
+          const addNewPlayer = (e) => {
+            e.preventDefault();
+            if (!newPlayerName.trim()) return;
+            const isMonthly = newPlayerType === 'monthly';
+            const newP = {
+              id: 'p_' + Date.now(),
+              name: newPlayerName.trim(),
+              type: newPlayerType,
+              fee: isMonthly ? 100000 : 25000,
+              checks: Number(newPlayerChecks) || 0,
+              stats: { played: 0, won: 0, lost: 0 }
+            };
+            setPlayers(prev => [...prev, newP]);
+            setNewPlayerName('');
+            setNewPlayerChecks(0);
+            showToast(`${newP.name} Berhasil Terdaftar!`, "success");
+          };
+          const handleQuickAddGuest = (sessionId, e) => {
+            e.preventDefault();
+            if (!guestName.trim()) return;
+            const newGuestId = 'p_guest_' + Date.now();
+            const newGuest = {
+              id: newGuestId,
+              name: guestName.trim() + " (Tamu)",
+              type: guestType,
+              fee: guestType === 'monthly' ? 100000 : 25000,
+              checks: 0,
+              stats: { played: 0, won: 0, lost: 0 }
+            };
+            setPlayers(prev => [...prev, newGuest]);
+            setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, rsvps: { ...s.rsvps, [newGuestId]: 'YES' } } : s));
+            setGuestName('');
+            showToast(`${newGuest.name} Ditambahkan ke RSVP! ✅`, "success");
+          };
+          const removePlayer = (id, name) => {
+            if (confirm(`Hapus ${name}?`)) {
+              setPlayers(prev => prev.filter(p => p.id !== id));
+              showToast("Pemain dihapus.");
+            }
+          };
+          const handleReceiptUpload = (e) => {
+            const file = e.target.files[0];
+            if (file) {
+              const reader = new FileReader();
+              reader.onloadend = () => { setTxSlip(reader.result); showToast("Slip Dimuat! 📸", "success"); };
+              reader.readAsDataURL(file);
+            }
+          };
+          const addTransaction = (e) => {
+            e.preventDefault();
+            const parsedAmount = parseFloat(txAmount);
+            if (isNaN(parsedAmount) || parsedAmount <= 0 || !txDesc.trim()) { showToast("Input tidak valid!", "error"); return; }
+            let finalDesc = txDesc;
+            if (txType === 'credit' && txPlayerId) {
+              const p = players.find(x => x.id === txPlayerId);
+              if (p) { finalDesc = `Bayar Iuran - ${p.name}: ${txDesc}`; incrementCheck(txPlayerId); }
+            }
+            const newTx = {
+              id: 't_' + Date.now(), type: txType, amount: parsedAmount, description: finalDesc,
+              date: new Date().toISOString().slice(0,10), note: txType === 'credit' ? 'Uang Masuk / Iuran' : 'Uang Keluar / Biaya',
+              slip: txSlip || (txType === 'credit' ? MOCK_SLIP_PLACEHOLDER : '')
+            };
+            setTransactions(prev => [newTx, ...prev]);
+            setTxAmount(''); setTxDesc(''); setTxPlayerId(''); setTxSlip('');
+            showToast("Transaksi Masuk Jurnal! 💰", "success");
+          };
+          const removeTransaction = (id) => { if (confirm("Hapus catatan?")) setTransactions(prev => prev.filter(t => t.id !== id)); };
+          const handleRsvpChange = (sessionId, playerId, status) => {
+            setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, rsvps: { ...s.rsvps, [playerId]: status } } : s));
+          };
+          const resetAllRsvps = (sessionId) => {
+            if (confirm("Reset seluruh status RSVP pemain?")) {
+              setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, rsvps: {} } : s));
+              showToast("RSVP dikosongkan! 🔄", "success");
+            }
+          };
+          const saveMatchResult = () => {
+            if (!dPlayer1 || !dPlayer2 || !dPlayer3 || !dPlayer4 || scoreA === scoreB) { showToast("Konfigurasi skor/pemain salah!", "error"); return; }
+            const nameA1 = players.find(p => p.id === dPlayer1)?.name || 'Pemain A1';
+            const nameA2 = players.find(p => p.id === dPlayer2)?.name || 'Pemain A2';
+            const nameB1 = players.find(p => p.id === dPlayer3)?.name || 'Pemain B1';
+            const nameB2 = players.find(p => p.id === dPlayer4)?.name || 'Pemain B2';
+            const newMatch = { id: 'm_' + Date.now(), team1: [nameA1, nameA2], team2: [nameB1, nameB2], score1: scoreA, score2: scoreB, date: new Date().toISOString().slice(0, 10) };
+            const winningTeam = scoreA > scoreB ? 'team1' : 'team2';
+            const activePlayerIds = [dPlayer1, dPlayer2, dPlayer3, dPlayer4];
+            setPlayers(prev => prev.map(p => {
+              if (activePlayerIds.includes(p.id)) {
+                const isTeam1 = p.id === dPlayer1 || p.id === dPlayer2;
+                const won = (isTeam1 && winningTeam === 'team1') || (!isTeam1 && winningTeam === 'team2');
+                return { ...p, stats: { played: (p.stats?.played || 0) + 1, won: (p.stats?.won || 0) + (won ? 1 : 0), lost: (p.stats?.lost || 0) + (won ? 0 : 1) } };
+              }
+              return p;
+            }));
+            setMatches(prev => [newMatch, ...prev]); showToast("Hasil Game Disimpan! 🏆", "success"); setScoreA(0); setScoreB(0);
+          };
+          const copyKeuanganWhatsApp = () => {
+            const playerLines = players.map(p => `${p.name} ${"✅".repeat(p.checks)} ${p.type === 'monthly' ? "payment monthly rp 100000" : "payment per play Rp25.000,."}`).join('\n');
+            const template = `Selamat pagi Bapak" Badminton, update keuangan Badminton hari ini :\n${playerLines}\n*Total Iuran Rp ${totalUangMasuk.toLocaleString('id-ID')},.*\n\n*Saldo Kas Badminton Rp ${saldoKas.toLocaleString('id-ID')},.*\n( Uang masuk Rp ${totalUangMasuk.toLocaleString('id-ID')},.  -  Uang keluar ${totalUangKeluar.toLocaleString('id-ID')} )`;
+            copyTextToClipboard(template);
+          };
+          const copyRsvpWhatsApp = (session) => {
+            const yesList = [], noList = [], maybeList = [], blankList = [];
+            players.forEach(p => {
+              const s = session.rsvps?.[p.id] || 'NO_RESPONSE';
+              if (s === 'YES') yesList.push(p.name);
+              else if (s === 'NO') noList.push(p.name);
+              else if (s === 'MAYBE') maybeList.push(p.name);
+              else blankList.push(p.name);
+            });
+            const template = `🏸 *GKI-BS Badminton Play RSVP* 🏸\n*Jadwal:* ${session.date} | ${session.time}\n*Tempat:* ${session.location} (${session.court})\n\n*Daftar Hadir (${yesList.length}):*\n${yesList.map((n,i)=>`${i+1}. ${n} ✅`).join('\n')}\n\n*Belum Konfirmasi:* ${blankList.join(', ')}`;
+            copyTextToClipboard(template);
+          };
+          const copyTextToClipboard = (text) => {
+            const el = document.createElement("textarea"); el.value = text; el.style.position = "fixed"; document.body.appendChild(el);
+            el.focus(); el.select(); document.execCommand('copy'); document.body.removeChild(el);
+            showToast("Format Teks Tersalin ke Clipboard! 📲", "success");
+          };
+          useEffect(() => { if (activeTab === 'tactical') redrawCanvas(); }, [activeTab, tacticalPlayers]);
+          const redrawCanvas = () => {
+            const cv = canvasRef.current; if (!cv) return;
+            const ctx = cv.getContext('2d'); ctx.fillStyle = '#065F46'; ctx.fillRect(0, 0, cv.width, cv.height);
+            ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 3; ctx.strokeRect(15, 15, cv.width - 30, cv.height - 30);
+            ctx.beginPath(); ctx.moveTo(15, cv.height / 2); ctx.lineTo(cv.width - 15, cv.height / 2); ctx.stroke();
+            tacticalPlayers.forEach(p => {
+              ctx.beginPath(); ctx.arc(p.x, p.y, 16, 0, Math.PI * 2); ctx.fillStyle = p.color; ctx.fill(); ctx.strokeStyle = '#FFFFFF'; ctx.stroke();
+              ctx.fillStyle = '#FFFFFF'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(p.label, p.x, p.y);
+            });
+          };
+          const handleCanvasMouseDown = (e) => {
+            const rect = canvasRef.current.getBoundingClientRect();
+            const x = e.clientX - rect.left, y = e.clientY - rect.top;
+            const match = tacticalPlayers.find(p => Math.hypot(p.x - x, p.y - y) < 20);
+            if (match) setDraggingId(match.id);
+          };
+          const handleCanvasMouseMove = (e) => {
+            if (!draggingId) return;
+            const rect = canvasRef.current.getBoundingClientRect();
+            const x = e.clientX - rect.left, y = e.clientY - rect.top;
+            setTacticalPlayers(prev => prev.map(p => p.id === draggingId ? { ...p, x, y } : p));
+          };
+          const handleCanvasMouseUpOrLeave = () => setDraggingId(null);
+          return (
+            <div className="min-h-screen bg-gray-950 text-gray-100 font-sans antialiased">
+              {notification && (
+                <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 px-5 py-3 rounded-xl bg-emerald-950/90 border border-emerald-500 text-emerald-200 shadow-2xl flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  {notification.message}
+                </div>
+              )}
+              <header className="border-b border-gray-800 bg-gray-900/60 backdrop-blur-xl sticky top-0 z-40 px-4">
+                <div className="max-w-7xl mx-auto h-16 flex items-center justify-between">
+                  <div>
+                    <h1 className="text-lg font-bold bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent">GKI-BS Badminton Play</h1>
+                    Cloud Sync &amp; Ledger Organizer
+                  </div>
+                  <button onClick={publishToCloud} className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-gray-950 text-xs font-bold rounded-xl transition-all">
+                    Sync &amp; Ambil Link WhatsApp
+                  </button>
+                </div>
+              </header>
+              <section className="bg-gradient-to-b from-gray-900 to-gray-950 py-6 px-4 border-b border-gray-900">
+                <div className="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-gray-900/40 border border-gray-800 p-4 rounded-2xl"><span className="text-xs text-gray-400 block mb-1">Saldo Kas</span><span className="text-xl font-black text-emerald-400">Rp {saldoKas.toLocaleString('id-ID')}</span></div>
+                  <div className="bg-gray-900/40 border border-gray-800 p-4 rounded-2xl"><span className="text-xs text-gray-400 block mb-1">Uang Masuk</span><span className="text-xl font-black text-gray-200">Rp {totalUangMasuk.toLocaleString('id-ID')}</span></div>
+                  <div className="bg-gray-900/40 border border-gray-800 p-4 rounded-2xl"><span className="text-xs text-gray-400 block mb-1">Uang Keluar</span><span className="text-xl font-black text-red-400">Rp {totalUangKeluar.toLocaleString('id-ID')}</span></div>
+                  <div className="bg-gray-900/40 border border-gray-800 p-4 rounded-2xl"><span className="text-xs text-gray-400 block mb-1">Total Roster</span><span className="text-xl font-black text-teal-400">{players.length} Pemain</span></div>
+                </div>
+              </section>
+              <nav className="max-w-7xl mx-auto px-4 my-6">
+                <div className="bg-gray-900 p-1.5 rounded-2xl flex flex-wrap gap-1">
+                  <button onClick={() => setActiveTab('dashboard')} className={`flex-1 py-2 rounded-xl text-xs font-bold ${activeTab === 'dashboard' ? 'bg-emerald-500 text-gray-950' : 'text-gray-400'}`}>🗓️ Sparing &amp; RSVP</button>
+                  <button onClick={() => setActiveTab('players')} className={`flex-1 py-2 rounded-xl text-xs font-bold ${activeTab === 'players' ? 'bg-emerald-500 text-gray-950' : 'text-gray-400'}`}>👥 Anggota</button>
+                  <button onClick={() => setActiveTab('matchmaker')} className={`flex-1 py-2 rounded-xl text-xs font-bold ${activeTab === 'matchmaker' ? 'bg-emerald-500 text-gray-950' : 'text-gray-400'}`}>🔥 Scoreboard</button>
+                  <button onClick={() => setActiveTab('ledger')} className={`flex-1 py-2 rounded-xl text-xs font-bold ${activeTab === 'ledger' ? 'bg-emerald-500 text-gray-950' : 'text-gray-400'}`}>💰 Buku Kas</button>
+                  <button onClick={() => setActiveTab('tactical')} className={`flex-1 py-2 rounded-xl text-xs font-bold ${activeTab === 'tactical' ? 'bg-emerald-500 text-gray-950' : 'text-gray-400'}`}>📋 Papan Taktik</button>
+                </div>
+              </nav>
+              <main className="max-w-7xl mx-auto px-4 pb-20">
+                {activeTab === 'dashboard' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div className="lg:col-span-2 space-y-6">
+                      {sessions.map(s => (
+                        <div key={s.id} className="bg-gray-900 border border-gray-800 rounded-3xl p-6 shadow-xl">
+                          <div className="flex justify-between border-b border-gray-800 pb-4 mb-4 flex-wrap gap-2">
+                            <div>
+                              <span className="text-xs font-bold text-emerald-400 uppercase">Next Match</span>
+                              <h3 className="text-lg font-bold text-white">{s.location} - {s.court}</h3>
+                              {s.date} | {s.time} WIB
+                            </div>
+                            <div className="flex gap-2 items-center">
+                              <button onClick={() => resetAllRsvps(s.id)} className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-xs font-bold rounded-lg">🔄 Reset</button>
+                              <button onClick={() => copyRsvpWhatsApp(s)} className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold rounded-lg">Salin List WA 📲</button>
+                            </div>
+                          </div>
+                          <div className="bg-gray-950/60 p-4 rounded-xl border border-gray-800 mb-6">
+                            <h4 className="text-xs font-bold text-emerald-400 mb-2">➕ Tambah Tamu / Pemain Tambahan Cepat</h4>
+                            <form onSubmit={(e) => handleQuickAddGuest(s.id, e)} className="flex gap-2">
+                              <input type="text" value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="Nama Tamu" className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 text-xs flex-1 text-white" />
+                              <select value={guestType} onChange={(e) => setGuestType(e.target.value)} className="bg-gray-900 border border-gray-800 rounded-lg px-2 text-xs text-white">
+                                <option value="per_play">Per Main (25k)</option>
+                                <option value="monthly">Bulanan (100k)</option>
+                              </select>
+                              <button type="submit" className="px-3 bg-emerald-500 text-gray-950 font-bold text-xs rounded-lg">Ikut ✅</button>
+                            </form>
+                          </div>
+                          <div className="space-y-2">
+                            {players.map(p => {
+                              const status = s.rsvps?.[p.id] || 'NO_RESPONSE';
+                              return (
+                                <div key={p.id} className="flex justify-between items-center p-2.5 bg-gray-950/40 rounded-xl">
+                                  <span className="text-sm font-bold text-white">{p.name}</span>
+                                  <div className="flex gap-1">
+                                    <button onClick={() => handleRsvpChange(s.id, p.id, 'YES')} className={`px-2 py-1 text-xs font-bold rounded ${status === 'YES' ? 'bg-emerald-500 text-gray-950' : 'bg-gray-800'}`}>Ikut</button>
+                                    <button onClick={() => handleRsvpChange(s.id, p.id, 'MAYBE')} className={`px-2 py-1 text-xs font-bold rounded ${status === 'MAYBE' ? 'bg-yellow-500 text-gray-950' : 'bg-gray-800'}`}>Ragu</button>
+                                    <button onClick={() => handleRsvpChange(s.id, p.id, 'NO')} className={`px-2 py-1 text-xs font-bold rounded ${status === 'NO' ? 'bg-red-500 text-gray-950' : 'bg-gray-800'}`}>Absen</button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-6">
+                      <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl">
+                        <button onClick={copyKeuanganWhatsApp} className="w-full py-3 bg-teal-500 hover:bg-teal-400 text-gray-950 font-bold text-xs rounded-xl shadow mb-4">Salin Buku Keuangan WA 📲</button>
+                        <input type="file" accept=".json" onChange={importBackupJson} className="w-full text-xs text-gray-500" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {activeTab === 'players' && (
+                  <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 shadow-xl">
+                    <form onSubmit={addNewPlayer} className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 items-end">
+                      <input type="text" value={newPlayerName} onChange={(e) => setNewPlayerName(e.target.value)} placeholder="Nama Anggota Inti" className="bg-gray-950 border border-gray-800 p-2 text-sm rounded-xl text-white focus:outline-none" />
+                      <select value={newPlayerType} onChange={(e) => setNewPlayerType(e.target.value)} className="bg-gray-950 border border-gray-800 p-2 text-sm rounded-xl text-white"><option value="monthly">Bulanan Flat (100k)</option><option value="per_play">Per Play (25k)</option></select>
+                      <button type="submit" className="py-2 bg-emerald-500 text-gray-950 font-bold rounded-xl text-sm">Daftarkan Pemain</button>
+                    </form>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left">
+                        <thead><tr className="bg-gray-950 text-xs text-gray-400 uppercase"><th className="p-4">Nama</th><th className="p-4">Jenis</th><th className="p-4">Checkmarks</th><th className="p-4">Total Kas</th><th className="p-4 text-center">Aksi</th></tr></thead>
+                        <tbody className="divide-y divide-gray-800">
+                          {players.map(p => (
+                            <tr key={p.id}>
+                              <td className="p-4 font-bold text-white">{p.name}</td>
+                              <td className="p-4 text-xs">{p.type === 'monthly' ? 'Bulanan' : 'Per Main'}</td>
+                              <td className="p-4">{"✅".repeat(p.checks) || "Belum Bayar"}</td>
+                              <td className="p-4 text-emerald-400 font-bold">Rp {(p.type === 'monthly' ? p.checks * 100000 : p.checks * 25000).toLocaleString('id-ID')}</td>
+                              <td className="p-4 flex justify-center gap-2">
+                                <button onClick={() => incrementCheck(p.id)} className="w-8 h-8 rounded bg-emerald-950 text-emerald-400 font-bold">+✅</button>
+                                <button onClick={() => decrementCheck(p.id)} className="w-8 h-8 rounded bg-red-950 text-red-400 font-bold">-✅</button>
+                                <button onClick={() => removePlayer(p.id, p.name)} className="w-8 h-8 rounded bg-gray-950 text-gray-500">🗑️</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+                {activeTab === 'matchmaker' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl space-y-4">
+                      <h3 className="text-lg font-bold text-white">Lineup Ganda</h3>
+                      <select value={dPlayer1} onChange={(e) => setDPlayer1(e.target.value)} className="w-full bg-gray-950 border border-gray-800 p-2 text-sm rounded-xl text-white"><option value="">Pemain A1</option>{players.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+                      <select value={dPlayer2} onChange={(e) => setDPlayer2(e.target.value)} className="w-full bg-gray-950 border border-gray-800 p-2 text-sm rounded-xl text-white"><option value="">Pemain A2</option>{players.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+                      <select value={dPlayer3} onChange={(e) => setDPlayer3(e.target.value)} className="w-full bg-gray-950 border border-gray-800 p-2 text-sm rounded-xl text-white"><option value="">Pemain B1</option>{players.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+                      <select value={dPlayer4} onChange={(e) => setDPlayer4(e.target.value)} className="w-full bg-gray-950 border border-gray-800 p-2 text-sm rounded-xl text-white"><option value="">Pemain B2</option>{players.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+                    </div>
+                    <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl text-center">
+                      <h3 className="text-lg font-bold text-white mb-4">Papan Poin Live 21</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <button onClick={() => setScoreA(prev => prev + 1)} className="text-4xl font-black bg-indigo-950 p-4 border border-indigo-800 rounded-xl text-white">{scoreA}</button>
+                        <button onClick={() => setScoreB(prev => prev + 1)} className="text-4xl font-black bg-red-950 p-4 border border-red-800 rounded-xl text-white">{scoreB}</button>
+                      </div>
+                      <button onClick={saveMatchResult} className="w-full mt-4 py-3 bg-emerald-500 font-bold text-gray-950 rounded-xl">Simpan &amp; Log Riwayat Game</button>
+                    </div>
+                    <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl max-h-[300px] overflow-y-auto">
+                      <h3 className="text-sm font-bold text-gray-400 uppercase mb-2">Win Rate Skuad</h3>
+                      {players.map(p => (
+                        <div key={p.id} className="flex justify-between py-1.5 border-b border-gray-800 text-xs">
+                          <span className="font-semibold">{p.name}</span>
+                          <span className="text-emerald-400 font-bold">{p.stats?.played ? Math.round((p.stats.won / p.stats.played) * 100) : 0}% WR</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {activeTab === 'ledger' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl h-fit">
+                      <form onSubmit={addTransaction} className="space-y-4">
+                        <div className="grid grid-cols-2 gap-2">
+                          <button type="button" onClick={() => setTxType('credit')} className="py-1.5 rounded-lg text-xs font-bold border border-emerald-500 text-emerald-400">Iuran IN</button>
+                          <button type="button" onClick={() => setTxType('debit')} className="py-1.5 rounded-lg text-xs font-bold border border-gray-800 text-gray-400">Biaya OUT</button>
+                        </div>
+                        <input type="number" value={txAmount} onChange={(e) => setTxAmount(e.target.value)} placeholder="Jumlah Rp" className="w-full bg-gray-950 border border-gray-800 p-2.5 text-xs text-white rounded-xl" />
+                        <input type="text" value={txDesc} onChange={(e) => setTxDesc(e.target.value)} placeholder="Keterangan Nota" className="w-full bg-gray-950 border border-gray-800 p-2.5 text-xs text-white rounded-xl" />
+                        <input type="file" accept="image/*" onChange={handleReceiptUpload} className="w-full text-xs text-gray-400" />
+                        <button type="submit" className="w-full py-2.5 bg-emerald-500 text-gray-950 font-bold text-xs rounded-xl">Simpan Jurnal Kas</button>
+                      </form>
+                    </div>
+                    <div className="lg:col-span-2 space-y-3 max-h-[500px] overflow-y-auto">
+                      {transactions.map(t => (
+                        <div key={t.id} className="p-4 bg-gray-900 border border-gray-800 rounded-xl flex justify-between items-center">
+                          <div><span className="text-sm font-bold text-white block">{t.description}</span><span className="text-[10px] text-gray-400">{t.date}</span></div>
+                          <div className="flex items-center gap-2">
+                            <span className={`text-sm font-black ${t.type === 'credit' ? 'text-emerald-400' : 'text-red-400'}`}>Rp {t.amount.toLocaleString('id-ID')}</span>
+                            {t.slip && <button onClick={() => setSelectedSlip(t.slip)} className="text-[10px] text-indigo-400 bg-indigo-950 border border-indigo-900 px-2 py-1 rounded">Nota 📸</button>}
+                            <button onClick={() => removeTransaction(t.id)} className="text-red-500 text-xs px-1">✕</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {activeTab === 'tactical' && (
+                  <div className="flex flex-col lg:flex-row gap-6 bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl items-center justify-center">
+                    <div className="w-full lg:w-1/3 space-y-2">
+                      <h3 className="text-base font-bold text-white">Strategi Court Planner</h3>
+                      Geser titik lingkaran pemain untuk menyusun pola tanding tim ganda secara visual.
+                      <button onClick={redrawCanvas} className="w-full mt-4 py-2 bg-red-950 border border-red-900 text-red-400 font-bold text-xs rounded-xl">Bersihkan Coretan Lapangan 🧹</button>
+                    </div>
+                    <canvas ref={canvasRef} width="300" height="400" onMouseDown={handleCanvasMouseDown} onMouseMove={handleCanvasMouseMove} onMouseUp={handleCanvasMouseUpOrLeave} onMouseLeave={handleCanvasMouseUpOrLeave} className="border border-gray-800 rounded-2xl bg-emerald-950 touch-none shadow-2xl cursor-crosshair" />
+                  </div>
+                )}
+              </main>
+              {selectedSlip && (
+                <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex items-center justify-center p-4" onClick={() => setSelectedSlip(null)}>
+                  <div className="relative max-w-sm w-full bg-gray-900 border border-gray-800 rounded-3xl p-4"><img src={selectedSlip} alt="Nota" className="w-full h-auto rounded-xl object-contain bg-gray-950" /></div>
+                </div>
+              )}
+            </div>
+          );
+        }
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
+
