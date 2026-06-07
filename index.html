@@ -43,16 +43,16 @@
           measurementId: "G-VFEJCT46PF"
         };
 
-        // Deteksi Dinamis Kredensial (Penting untuk kompatibilitas lokal, preview, & live)
-        let firebaseConfig = FALLBACK_FIREBASE_CONFIG;
-        if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-          try {
-            firebaseConfig = JSON.parse(__firebase_config);
-          } catch (e) {
-            console.error("Gagal parse __firebase_config otomatis:", e);
-          }
-        }
+        // Deteksi Dinamis Kredensial (Kompatibel untuk lokal, sandbox, & production)
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : FALLBACK_FIREBASE_CONFIG;
         const appId = typeof __app_id !== 'undefined' ? __app_id : DEFAULT_APP_ID;
+
+        // Inisialisasi Firebase secara global di luar komponen (Mencegah inisialisasi ulang saat render)
+        if (!window.firebase.apps.length) {
+          window.firebase.initializeApp(firebaseConfig);
+        }
+        const auth = window.firebase.auth();
+        const db = window.firebase.firestore();
 
         const INITIAL_PLAYERS = [
           { id: 'p1', name: 'Pak T. H. Hutagalung', type: 'monthly', fee: 100000, checks: 3, stats: { played: 12, won: 8, lost: 4 } },
@@ -120,7 +120,7 @@
 
           const [notification, setNotification] = useState(null);
           const [isSyncing, setIsSyncing] = useState(false);
-          const [workspaceUrl, setWorkspaceUrl] = useState('');
+          const [workspaceUrl, setWorkspaceUrl] = useState('GKI_BS_DEFAULT_ROOM');
 
           const canvasRef = useRef(null);
           const [tacticalPlayers, setTacticalPlayers] = useState([
@@ -131,14 +131,13 @@
           ]);
           const [draggingId, setDraggingId] = useState(null);
           
-          // Telemetri Diagnostik Firebase
-          const [db, setDb] = useState(null);
+          // Firebase Auth & Connection State
+          const [user, setUser] = useState(null);
           const [cloudStatus, setCloudStatus] = useState('pending'); // 'pending', 'connected', 'offline_fallback', 'error_firestore'
           const [diagnosticLogs, setDiagnosticLogs] = useState([]);
           const [firebaseErrorMessage, setFirebaseErrorMessage] = useState('');
-          const [authErrorType, setAuthErrorType] = useState(''); // 'unauthorized_domain', 'disabled', 'generic'
 
-          // Modal Konfirmasi Kustom untuk iFrame (Menggantikan confirm)
+          // Modal Konfirmasi Kustom untuk iFrame (Sesuai Aturan: No Browser Alerts/Confirms)
           const [confirmModal, setConfirmModal] = useState({
             isOpen: false,
             title: '',
@@ -146,31 +145,73 @@
             onConfirm: null
           });
 
-          // Proteksi Loop Ganda menggunakan Pelacak Versi Dokumen
+          // Proteksi Sinkronisasi Siklus Ganda
           const localVersion = useRef(1); 
           const cloudVersion = useRef(0); 
           const isListeningToCloud = useRef(false);
-          const unsubscribeRef = useRef(null);
 
           const addLog = (msg) => {
             const time = new Date().toLocaleTimeString('id-ID');
             setDiagnosticLogs(prev => [...prev, `[${time}] ${msg}`]);
           };
 
-          // --- ENGINE SINKRONISASI CLOUD DENGAN PROTEKSI TIMEOUT GRACEFUL ---
+          // --- LEVEL 1: PROSES AUTENTIKASI UTAMA (MANDATORY RULE 3 - AUTH FIRST) ---
           useEffect(() => {
+            const initAuth = async () => {
+              addLog("Memulai Autentikasi Keamanan Cloud...");
+              try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                  addLog("Menggunakan Token Keamanan khusus...");
+                  await auth.signInWithCustomToken(__initial_auth_token);
+                } else {
+                  addLog("Menghubungkan secara Anonim ke Google Firebase...");
+                  await auth.signInAnonymously();
+                }
+              } catch (authError) {
+                addLog(`⚠️ Hambatan Masuk: ${authError.message}`);
+                // Jika token kustom gagal, fallback ke login anonim
+                try {
+                  await auth.signInAnonymously();
+                } catch (retryError) {
+                  addLog(`❌ Kegagalan Kritis Masuk Anonim: ${retryError.message}`);
+                }
+              }
+            };
+
+            initAuth();
+
+            const unsubscribeAuth = auth.onAuthStateChanged((currentUser) => {
+              if (currentUser) {
+                addLog(`👤 Autentikasi Berhasil! Pengguna ID: ${currentUser.uid}`);
+                setUser(currentUser);
+              } else {
+                addLog("👤 Pengguna tidak terdaftar.");
+                setUser(null);
+              }
+            });
+
+            return () => unsubscribeAuth();
+          }, []);
+
+          // --- LEVEL 2: PROSES SINKRONISASI FIRESTORE (MANDATORY RULE 3 - GUARDED BY USER) ---
+          useEffect(() => {
+            if (!user) {
+              addLog("Menunggu otorisasi keamanan sebelum mengunduh data...");
+              return;
+            }
+
             const params = new URLSearchParams(window.location.search);
             const paramWorkspace = params.get('workspace');
             const activeRoomId = paramWorkspace || 'GKI_BS_DEFAULT_ROOM';
-            if (paramWorkspace) {
-              setWorkspaceUrl(activeRoomId);
-            }
+            setWorkspaceUrl(activeRoomId);
 
-            // Batas waktu pemuatan (4 detik). Jika lewat, otomatis fallback ke luring agar aplikasi tetap dapat berjalan
+            addLog(`📡 Membuka koneksi cloud untuk Room Workspace: #${activeRoomId}...`);
+
+            // Batas waktu tunggu jaringan (4 detik)
             const networkTimeout = setTimeout(() => {
               setCloudStatus(prev => {
                 if (prev === 'pending') {
-                  addLog("⚠️ Koneksi cloud lambat. Mengaktifkan Mode Luring.");
+                  addLog("⚠️ Jaringan lambat. Mengaktifkan Mode Luring Aman.");
                   showToast("Berjalan dalam Mode Aman Luring! 💾", "info");
                   return 'offline_fallback';
                 }
@@ -178,119 +219,69 @@
               });
             }, 4000);
 
-            if (typeof window !== 'undefined' && window.firebase) {
-              const initFirebase = async () => {
-                try {
-                  addLog("Menginisialisasi modul Google Firebase...");
-                  if (!window.firebase.apps.length) {
-                    window.firebase.initializeApp(firebaseConfig);
-                  }
-                  const auth = window.firebase.auth();
-                  const firestoreDb = window.firebase.firestore();
-                  setDb(firestoreDb);
+            // Jalur Firestore Aman (MANDATORY RULE 1)
+            const docRef = db
+              .collection('artifacts')
+              .doc(appId)
+              .collection('public')
+              .doc('data')
+              .collection('gki_bs_rooms')
+              .doc(activeRoomId);
 
-                  addLog("Memverifikasi Keamanan Autentikasi...");
-                  try {
-                    // RULE 3: Autentikasi aman memprioritaskan Token Kustom Platform
-                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                      const cred = await auth.signInWithCustomToken(__initial_auth_token);
-                      addLog(`Koneksi Aman Aktif! UID: ${cred.user.uid}`);
-                    } else {
-                      const cred = await auth.signInAnonymously();
-                      addLog(`Koneksi Aman Aktif! UID: ${cred.user.uid}`);
-                    }
-                  } catch (authError) {
-                    addLog(`⚠️ Autentikasi anonim dibatasi: ${authError.message}`);
-                    if (authError.code === 'auth/unauthorized-domain') {
-                      setAuthErrorType('unauthorized_domain');
-                    } else if (authError.code === 'auth/operation-not-allowed') {
-                      setAuthErrorType('disabled');
-                    } else {
-                      setAuthErrorType('generic');
-                    }
-                    setFirebaseErrorMessage(authError.message);
-                    addLog("Melanjutkan koneksi langsung tanpa autentikasi...");
-                  }
-
-                  addLog(`Membuka terowongan data untuk Room: #${activeRoomId}...`);
-                  
-                  // RULE 1: Jalur aman terstruktur Firestore
-                  const docRef = firestoreDb
-                    .collection('artifacts')
-                    .doc(appId)
-                    .collection('public')
-                    .doc('data')
-                    .collection('gki_bs_rooms')
-                    .doc(activeRoomId);
-
-                  unsubscribeRef.current = docRef.onSnapshot((snapshot) => {
-                    clearTimeout(networkTimeout);
-                    if (snapshot.exists()) {
-                      const data = snapshot.data();
-                      const remoteVersion = data.version || 0;
-
-                      // Proteksi loop ganda: Hanya terapkan jika versi cloud lebih baru
-                      if (remoteVersion > localVersion.current || localVersion.current === 1) {
-                        isListeningToCloud.current = true;
-                        
-                        if (data.players) setPlayers(data.players);
-                        if (data.sessions) setSessions(data.sessions);
-                        if (data.transactions) setTransactions(data.transactions);
-                        if (data.matches) setMatches(data.matches);
-                        if (data.tacticalPlayers) setTacticalPlayers(data.tacticalPlayers);
-                        
-                        localVersion.current = remoteVersion;
-                        cloudVersion.current = remoteVersion;
-
-                        setCloudStatus('connected');
-                        addLog(`✅ Sinkronisasi Berhasil Dimuat (v${remoteVersion})!`);
-
-                        setTimeout(() => {
-                          isListeningToCloud.current = false;
-                        }, 100);
-                      } else {
-                        addLog(`ℹ️ Mengabaikan update cloud lama (remote: v${remoteVersion}, local: v${localVersion.current})`);
-                      }
-                    } else {
-                      addLog(`Room #${activeRoomId} kosong di cloud. Mengunggah konfigurasi lokal...`);
-                      setCloudStatus('connected');
-                      triggerStateSync();
-                    }
-                  }, (firestoreError) => {
-                    clearTimeout(networkTimeout);
-                    setCloudStatus('error_firestore');
-                    setFirebaseErrorMessage(firestoreError.message);
-                    addLog(`❌ KENDALA FIRESTORE RULES: ${firestoreError.message}`);
-                  });
-
-                } catch (e) {
-                  clearTimeout(networkTimeout);
-                  setCloudStatus('offline_fallback');
-                  setFirebaseErrorMessage(e.message);
-                  addLog(`❌ PROSES LEWATI: ${e.message}`);
-                }
-              };
-
-              initFirebase();
-            } else {
+            const unsubscribeFirestore = docRef.onSnapshot((snapshot) => {
               clearTimeout(networkTimeout);
-              addLog("⚠️ SDK Firebase gagal dimuat.");
-              setCloudStatus('offline_fallback');
-            }
+              if (snapshot.exists()) {
+                const data = snapshot.data();
+                const remoteVersion = data.version || 0;
+
+                // Proteksi tabrakan data (Hanya ganti data lokal jika versi cloud lebih baru)
+                if (remoteVersion > localVersion.current || localVersion.current === 1) {
+                  isListeningToCloud.current = true;
+                  
+                  if (data.players) setPlayers(data.players);
+                  if (data.sessions) setSessions(data.sessions);
+                  if (data.transactions) setTransactions(data.transactions);
+                  if (data.matches) setMatches(data.matches);
+                  if (data.tacticalPlayers) setTacticalPlayers(data.tacticalPlayers);
+                  
+                  localVersion.current = remoteVersion;
+                  cloudVersion.current = remoteVersion;
+
+                  setCloudStatus('connected');
+                  addLog(`✅ Data Cloud Terbaru Berhasil Sinkron (v${remoteVersion})`);
+
+                  setTimeout(() => {
+                    isListeningToCloud.current = false;
+                  }, 120);
+                } else {
+                  addLog(`ℹ️ Update cloud diabaikan karena versi lokal lebih baru (Cloud: v${remoteVersion}, Lokal: v${localVersion.current})`);
+                }
+              } else {
+                addLog(`Room #${activeRoomId} kosong di cloud. Siap mengunggah data lokal baru.`);
+                setCloudStatus('connected');
+                triggerStateSync();
+              }
+            }, (firestoreError) => {
+              clearTimeout(networkTimeout);
+              setCloudStatus('error_firestore');
+              setFirebaseErrorMessage(firestoreError.message);
+              addLog(`❌ KENDALA FIRESTORE: ${firestoreError.message}`);
+            });
 
             return () => {
               clearTimeout(networkTimeout);
-              if (unsubscribeRef.current) unsubscribeRef.current();
+              if (unsubscribeFirestore) unsubscribeFirestore();
             };
-          }, []);
+          }, [user, workspaceUrl]);
 
-          // --- ENGINE AUTO-SYNC INSTAN (Hanya Mengirim Data Jika Ada Perubahan Aksi Nyata) ---
+          // --- LEVEL 3: ENGINE AUTO-SAVE CLOUD INSTAN (MANDATORY RULE 3 - GUARDED) ---
           useEffect(() => {
-            if (isListeningToCloud.current) return; // Lindungi agar data cloud tidak tertimpa balik secara sengaja
+            if (!user) return; // Mencegah penulisan data sebelum terautentikasi
+            if (isListeningToCloud.current) return; // Mencegah data cloud tertimpa balik oleh data lama
 
             if (db && cloudStatus === 'connected' && workspaceUrl && localVersion.current > cloudVersion.current) {
               const targetVersion = localVersion.current;
-              cloudVersion.current = targetVersion; // Eagerly set untuk menghindari pengiriman dobel
+              cloudVersion.current = targetVersion; 
 
               const payload = { 
                 players, 
@@ -311,14 +302,14 @@
                 .doc(workspaceUrl);
 
               docRef.set(JSON.parse(JSON.stringify(payload))).then(() => {
-                addLog(`🔄 Auto-Sync Berhasil Disimpan ke Cloud (v${targetVersion})!`);
+                addLog(`🔄 Sinkronisasi otomatis sukses ke cloud (v${targetVersion})!`);
               }).catch(err => {
                 console.error("Auto-sync error:", err);
-                addLog(`⚠️ Auto-sync tertunda: ${err.message}`);
-                cloudVersion.current = targetVersion - 1; // Rollback agar dapat dicoba lagi
+                addLog(`⚠️ Sinkronisasi otomatis tertunda: ${err.message}`);
+                cloudVersion.current = targetVersion - 1; // Rollback versi agar bisa dicoba kembali
               });
             }
-          }, [players, sessions, transactions, matches, tacticalPlayers, db, cloudStatus, workspaceUrl]);
+          }, [players, sessions, transactions, matches, tacticalPlayers, db, cloudStatus, workspaceUrl, user]);
 
           const triggerStateSync = () => {
             localVersion.current = Math.max(localVersion.current, cloudVersion.current) + 1;
@@ -342,14 +333,15 @@
           };
 
           const publishToCloud = async () => {
-            const activeRoomId = workspaceUrl || Math.random().toString(36).substring(2, 8).toUpperCase();
-            if (!workspaceUrl) {
+            let activeRoomId = workspaceUrl;
+            if (!activeRoomId || activeRoomId === 'GKI_BS_DEFAULT_ROOM') {
+              activeRoomId = 'GKI_BS_' + Math.random().toString(36).substring(2, 8).toUpperCase();
               setWorkspaceUrl(activeRoomId);
               const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + `?workspace=${activeRoomId}`;
               window.history.replaceState({ path: newUrl }, '', newUrl);
             }
 
-            if (!db || cloudStatus !== 'connected') {
+            if (!user || !db || cloudStatus !== 'connected') {
               showToast("Gagal menyimpan ke cloud. Backup JSON diunduh lokal! 💾", "info");
               exportBackupJson();
               return;
@@ -385,6 +377,19 @@
             } finally {
               setIsSyncing(false);
             }
+          };
+
+          const copyWorkspaceLink = () => {
+            let activeRoomId = workspaceUrl;
+            if (!activeRoomId || activeRoomId === 'GKI_BS_DEFAULT_ROOM') {
+              activeRoomId = 'GKI_BS_' + Math.random().toString(36).substring(2, 8).toUpperCase();
+              setWorkspaceUrl(activeRoomId);
+              const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + `?workspace=${activeRoomId}`;
+              window.history.replaceState({ path: newUrl }, '', newUrl);
+            }
+            const shareUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + `?workspace=${activeRoomId}`;
+            copyTextToClipboard(shareUrl);
+            showToast(`Tautan khusus Room #${activeRoomId} berhasil disalin! Silakan bagikan ke WhatsApp. 📲`, "success");
           };
 
           const exportBackupJson = () => {
@@ -469,8 +474,8 @@
 
           const removePlayer = (id, name) => {
             openConfirm(
-              "Hapus Anggota",
-              `Apakah bapak yakin ingin menghapus ${name} dari daftar anggota inti?`,
+              "Hapus Anggota Skuad",
+              `Apakah bapak yakin ingin menghapus ${name} dari daftar anggota inti GKI-BS?`,
               () => {
                 setPlayers(prev => prev.filter(p => p.id !== id));
                 showToast("Pemain berhasil dihapus.");
@@ -501,7 +506,7 @@
           const removeTransaction = (id) => {
             openConfirm(
               "Hapus Catatan Jurnal",
-              "Apakah bapak yakin ingin menghapus catatan transaksi keuangan ini?",
+              "Apakah bapak yakin ingin menghapus catatan transaksi keuangan kas ini?",
               () => {
                 setTransactions(prev => prev.filter(t => t.id !== id));
                 showToast("Catatan kas terhapus.");
@@ -573,7 +578,6 @@
           const copyTextToClipboard = (text) => {
             const el = document.createElement("textarea"); el.value = text; el.style.position = "fixed"; document.body.appendChild(el);
             el.focus(); el.select(); document.execCommand('copy'); document.body.removeChild(el);
-            showToast("Format Teks Tersalin ke Clipboard! 📲", "success");
           };
 
           useEffect(() => { if (activeTab === 'tactical') redrawCanvas(); }, [activeTab, tacticalPlayers]);
@@ -641,9 +645,9 @@
                 </div>
               )}
 
-              {/* MODAL KONFIRMASI KUSTOM (MENGGANTIKAN WINDOW.CONFIRM YANG BERMASALAH DI IFRAME) */}
+              {/* MODAL KONFIRMASI KUSTOM */}
               {confirmModal.isOpen && (
-                <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+                <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
                   <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200">
                     <h3 className="text-base font-black text-white flex items-center gap-2">
                       <span className="text-amber-500">⚠️</span> {confirmModal.title}
@@ -668,7 +672,7 @@
                     <p className="text-xs text-gray-400">Cloud Sync &amp; Ledger Organizer</p>
                   </div>
                   
-                  {/* Indikator Jaringan & Workspace */}
+                  {/* Indikator Status Database */}
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold ${
                       cloudStatus === 'connected' ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-800/60' :
@@ -680,12 +684,15 @@
                         cloudStatus === 'pending' ? 'bg-amber-400 animate-ping' :
                         'bg-red-400'
                       }`} />
-                      {cloudStatus === 'connected' ? `Terhubung Room: #${workspaceUrl || 'Lokal'}` :
+                      {cloudStatus === 'connected' ? `Terhubung Room: #${workspaceUrl}` :
                        cloudStatus === 'pending' ? 'Menghubungkan...' :
                        'Aman (Mode Luring) 💾'}
                     </span>
+                    <button onClick={copyWorkspaceLink} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-indigo-600/20">
+                      Bagikan Tautan Room 🔗
+                    </button>
                     <button onClick={publishToCloud} className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-gray-950 text-xs font-bold rounded-xl transition-all shadow-lg shadow-emerald-500/20">
-                      Ambil Link WhatsApp 📲
+                      Sync Manual 🚀
                     </button>
                   </div>
                 </div>
@@ -695,7 +702,7 @@
               {cloudStatus !== 'connected' && (
                 <div className="max-w-7xl mx-auto mt-4 mx-4 p-6 bg-red-950/20 border border-red-500/30 rounded-3xl text-sm text-red-200 shadow-2xl">
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="text-lg">🛠️</span>
+                    <span className="text-lg">⚙️</span>
                     <h3 className="font-extrabold text-base text-white">Panduan Solusi Jaringan Cloud Skuad</h3>
                   </div>
                   <p className="text-xs text-gray-300 mb-4 leading-relaxed">
@@ -773,7 +780,7 @@ service cloud.firestore {
                         const calculatedCourtsNeeded = Math.max(1, Math.ceil(totalWillCome / 8));
 
                         return (
-                          <div key={s.id} className="bg-gray-900 border border-gray-800 rounded-3xl p-6 shadow-xl space-y-6">
+                          <div key={s.id} className="bg-gray-900 border border-gray-800 rounded-3xl p-6 shadow-xl space-y-6 animate-in fade-in duration-200">
                             <div className="flex justify-between border-b border-gray-800 pb-4 mb-4 flex-wrap gap-2">
                               <div>
                                 <span className="text-xs font-bold text-emerald-400 uppercase">Next Match</span>
@@ -781,7 +788,7 @@ service cloud.firestore {
                                 <p className="text-xs text-gray-400">{s.date} | {s.time} WIB</p>
                               </div>
                               <div className="flex gap-2 items-center">
-                                <button onClick={() => resetAllRsvps(s.id)} className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-xs font-bold rounded-lg transition-all">🔄 Reset</button>
+                                <button onClick={() => resetAllRsvps(s.id)} className="px-3 py-1.5 bg-gray-800 hover:bg-gray-750 text-xs font-bold rounded-lg transition-all">🔄 Reset</button>
                                 <button onClick={() => copyRsvpWhatsApp(s)} className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold rounded-lg transition-all">Salin List WA 📲</button>
                               </div>
                             </div>
@@ -843,12 +850,12 @@ service cloud.firestore {
                               {players.map(p => {
                                 const status = s.rsvps?.[p.id] || 'NO_RESPONSE';
                                 return (
-                                  <div key={p.id} className="flex justify-between items-center p-2.5 bg-gray-950/40 rounded-xl">
+                                  <div key={p.id} className="flex justify-between items-center p-2.5 bg-gray-950/40 rounded-xl hover:bg-gray-900/35 transition-all">
                                     <span className="text-sm font-bold text-white">{p.name}</span>
                                     <div className="flex gap-1">
-                                      <button onClick={() => handleRsvpChange(s.id, p.id, 'YES')} className={`px-2.5 py-1.5 text-xs font-bold rounded-lg transition-all ${status === 'YES' ? 'bg-emerald-500 text-gray-950' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>Ikut</button>
-                                      <button onClick={() => handleRsvpChange(s.id, p.id, 'MAYBE')} className={`px-2.5 py-1.5 text-xs font-bold rounded-lg transition-all ${status === 'MAYBE' ? 'bg-yellow-500 text-gray-950' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>Ragu</button>
-                                      <button onClick={() => handleRsvpChange(s.id, p.id, 'NO')} className={`px-2.5 py-1.5 text-xs font-bold rounded-lg transition-all ${status === 'NO' ? 'bg-red-500 text-gray-950' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>Absen</button>
+                                      <button onClick={() => handleRsvpChange(s.id, p.id, 'YES')} className={`px-2.5 py-1.5 text-xs font-bold rounded-lg transition-all ${status === 'YES' ? 'bg-emerald-500 text-gray-950' : 'bg-gray-800 text-gray-400 hover:bg-gray-750'}`}>Ikut</button>
+                                      <button onClick={() => handleRsvpChange(s.id, p.id, 'MAYBE')} className={`px-2.5 py-1.5 text-xs font-bold rounded-lg transition-all ${status === 'MAYBE' ? 'bg-yellow-500 text-gray-950' : 'bg-gray-800 text-gray-400 hover:bg-gray-750'}`}>Ragu</button>
+                                      <button onClick={() => handleRsvpChange(s.id, p.id, 'NO')} className={`px-2.5 py-1.5 text-xs font-bold rounded-lg transition-all ${status === 'NO' ? 'bg-red-500 text-gray-950' : 'bg-gray-800 text-gray-400 hover:bg-gray-750'}`}>Absen</button>
                                     </div>
                                   </div>
                                 );
@@ -880,7 +887,7 @@ service cloud.firestore {
                 )}
 
                 {activeTab === 'players' && (
-                  <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 shadow-xl">
+                  <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 shadow-xl animate-in fade-in duration-200">
                     <form onSubmit={addNewPlayer} className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 items-end">
                       <input type="text" value={newPlayerName} onChange={(e) => setNewPlayerName(e.target.value)} placeholder="Nama Anggota Inti" className="bg-gray-950 border border-gray-800 p-2 text-sm rounded-xl text-white focus:outline-none" />
                       <select value={newPlayerType} onChange={(e) => setNewPlayerType(e.target.value)} className="bg-gray-950 border border-gray-800 p-2 text-sm rounded-xl text-white">
@@ -894,7 +901,7 @@ service cloud.firestore {
                         <thead><tr className="bg-gray-950 text-xs text-gray-400 uppercase"><th className="p-4">Nama</th><th className="p-4">Jenis</th><th className="p-4">Checkmarks</th><th className="p-4">Total Kas</th><th className="p-4 text-center">Aksi</th></tr></thead>
                         <tbody className="divide-y divide-gray-800">
                           {players.map(p => (
-                            <tr key={p.id}>
+                            <tr key={p.id} className="hover:bg-gray-900/10 transition-all">
                               <td className="p-4 font-bold text-white">{p.name}</td>
                               <td className="p-4 text-xs">{p.type === 'monthly' ? 'Bulanan' : 'Per Main'}</td>
                               <td className="p-4">{"✅".repeat(p.checks) || "Belum Bayar"}</td>
@@ -913,7 +920,7 @@ service cloud.firestore {
                 )}
 
                 {activeTab === 'matchmaker' && (
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-200">
                     <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl space-y-4">
                       <h3 className="text-lg font-bold text-white">Lineup Ganda</h3>
                       <select value={dPlayer1} onChange={(e) => setDPlayer1(e.target.value)} className="w-full bg-gray-950 border border-gray-800 p-2.5 text-sm rounded-xl text-white focus:outline-none"><option value="">Pemain A1</option>{players.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
@@ -922,11 +929,11 @@ service cloud.firestore {
                       <select value={dPlayer4} onChange={(e) => setDPlayer4(e.target.value)} className="w-full bg-gray-950 border border-gray-800 p-2.5 text-sm rounded-xl text-white focus:outline-none"><option value="">Pemain B2</option>{players.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
                     </div>
 
-                    {/* INTERACTIVE SCOREBOARD WITH PLUS AND MINUS OPTIONS */}
+                    {/* INTERACTIVE SCOREBOARD */}
                     <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl text-center flex flex-col justify-between">
                       <div>
                         <h3 className="text-lg font-bold text-white">Papan Poin Live 21</h3>
-                        <p className="text-[11px] text-gray-400 mt-0.5">Gunakan tombol + dan - untuk merubah nilai skor pertandingan</p>
+                        <p className="text-[11px] text-gray-400 mt-0.5">Gunakan tombol + dan - untuk mengubah nilai skor pertandingan</p>
                       </div>
                       
                       <div className="grid grid-cols-2 gap-4 my-6">
@@ -970,7 +977,7 @@ service cloud.firestore {
                 )}
 
                 {activeTab === 'ledger' && (
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-200">
                     <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl h-fit">
                       <form onSubmit={addTransaction} className="space-y-4">
                         <div className="grid grid-cols-2 gap-2">
@@ -984,7 +991,7 @@ service cloud.firestore {
                     </div>
                     <div className="lg:col-span-2 space-y-3 max-h-[500px] overflow-y-auto">
                       {transactions.map(t => (
-                        <div key={t.id} className="p-4 bg-gray-900 border border-gray-800 rounded-xl flex justify-between items-center">
+                        <div key={t.id} className="p-4 bg-gray-900 border border-gray-800 rounded-xl flex justify-between items-center hover:bg-gray-900/40 transition-all">
                           <div><span className="text-sm font-bold text-white block">{t.description}</span><span className="text-[10px] text-gray-400">{t.date}</span></div>
                           <div className="flex items-center gap-2">
                             <span className={`text-sm font-black ${t.type === 'credit' ? 'text-emerald-400' : 'text-red-400'}`}>Rp {t.amount.toLocaleString('id-ID')}</span>
@@ -997,7 +1004,7 @@ service cloud.firestore {
                 )}
 
                 {activeTab === 'tactical' && (
-                  <div className="flex flex-col lg:flex-row gap-6 bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl items-center justify-center">
+                  <div className="flex flex-col lg:flex-row gap-6 bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl items-center justify-center animate-in fade-in duration-200">
                     <div className="w-full lg:w-1/3 space-y-2">
                       <h3 className="text-base font-bold text-white">Strategi Court Planner</h3>
                       <p className="text-xs text-gray-400">Geser titik lingkaran pemain untuk menyusun pola tanding tim ganda secara visual.</p>
