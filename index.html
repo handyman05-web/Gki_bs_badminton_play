@@ -27,12 +27,8 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // --- KONFIGURASI DATABASE LOCK ---
+        // --- KONFIGURASI DATABASE ---
         const DEFAULT_APP_ID = 'gki-bs-badminton';
-        const DEFAULT_COURT_COST_PER_HOUR = 55000;
-        const DEFAULT_SHUTTLECOCK_COST_PER_PACK = 145000;
-
-        // Kredensial Firebase Proyek Anda (GitHub Pages)
         const FALLBACK_FIREBASE_CONFIG = {
           apiKey: "AIzaSyAKWV_5Y9gWh7_Mp33YeTYS-v0kGGO0K0s",
           authDomain: "gki-bs-badminton-play.firebaseapp.com",
@@ -43,62 +39,91 @@
           measurementId: "G-VFEJCT46PF"
         };
 
-        // Deteksi Dinamis Kredensial (Kompatibel untuk lokal, sandbox, & production)
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : FALLBACK_FIREBASE_CONFIG;
         const appId = typeof __app_id !== 'undefined' ? __app_id : DEFAULT_APP_ID;
 
-        // Inisialisasi Firebase secara global di luar komponen (Mencegah inisialisasi ulang saat render)
+        // Inisialisasi Firebase Sekali Saja Secara Global
         if (!window.firebase.apps.length) {
           window.firebase.initializeApp(firebaseConfig);
         }
         const auth = window.firebase.auth();
         const db = window.firebase.firestore();
 
+        // --- DATA BACKUP ASLI GKI-BS (Dari JSON Bapak) ---
         const INITIAL_PLAYERS = [
-          { id: 'p1', name: 'Pak T. H. Hutagalung', type: 'monthly', fee: 100000, checks: 3, stats: { played: 12, won: 8, lost: 4 } },
-          { id: 'p2', name: 'Pak W. Napitupulu', type: 'monthly', fee: 100000, checks: 2, stats: { played: 8, won: 5, lost: 3 } },
-          { id: 'p3', name: 'Pak Handi Muliawan', type: 'monthly', fee: 100000, checks: 3, stats: { played: 14, won: 10, lost: 4 } },
-          { id: 'p4', name: 'Pak Veky Pamintu', type: 'monthly', fee: 100000, checks: 2, stats: { played: 6, won: 3, lost: 3 } },
-          { id: 'p5', name: 'Pak N. Sitohang', type: 'monthly', fee: 100000, checks: 6, stats: { played: 20, won: 13, lost: 7 } },
-          { id: 'p6', name: 'Pak M.V. Sitinjak', type: 'monthly', fee: 100000, checks: 2, stats: { played: 10, won: 4, lost: 6 } },
-          { id: 'p7', name: 'Pak Jeff Ma', type: 'monthly', fee: 100000, checks: 3, stats: { played: 11, won: 7, lost: 4 } },
-          { id: 'p8', name: 'Pak R.Tambunan', type: 'monthly', fee: 100000, checks: 3, stats: { played: 15, won: 9, lost: 6 } },
-          { id: 'p9', name: 'Pak G.Sagala', type: 'monthly', fee: 100000, checks: 4, stats: { played: 16, won: 11, lost: 5 } },
-          { id: 'p10', name: 'Pak M.F.Gultom', type: 'monthly', fee: 100000, checks: 2, stats: { played: 9, won: 4, lost: 5 } },
-          { id: 'p11', name: 'Pak E.Sitorus', type: 'per_play', fee: 25000, checks: 7, stats: { played: 18, won: 10, lost: 8 } },
-          { id: 'p12', name: 'Pak J. Siagian', type: 'per_play', fee: 25000, checks: 1, stats: { played: 4, won: 1, lost: 3 } },
-          { id: 'p13', name: 'Pak F. Tripika', type: 'per_play', fee: 25000, checks: 2, stats: { played: 8, won: 5, lost: 3 } },
-          { id: 'p14', name: 'Pak H. Sihotang', type: 'per_play', fee: 25000, checks: 1, stats: { played: 3, won: 1, lost: 2 } }
+          { "id": "p1", "name": "Pak T. H. Hutagalung", "type": "monthly", "fee": 100000, "checks": 3, "stats": { "played": 12, "won": 8, "lost": 4 } },
+          { "id": "p2", "name": "Pak W. Napitupulu", "type": "monthly", "fee": 100000, "checks": 2, "stats": { "played": 8, "won": 5, "lost": 3 } },
+          { "id": "p3", "name": "Pak Handi Muliawan", "type": "monthly", "fee": 100000, "checks": 3, "stats": { "played": 14, "won": 10, "lost": 4 } },
+          { "id": "p4", "name": "Pak Veky Pamintu", "type": "monthly", "fee": 100000, "checks": 2, "stats": { "played": 6, "won": 3, "lost": 3 } },
+          { "id": "p5", "name": "Pak N. Sitohang", "type": "monthly", "fee": 100000, "checks": 6, "stats": { "played": 20, "won": 13, "lost": 7 } },
+          { "id": "p6", "name": "Pak M.V. Sitinjak", "type": "monthly", "fee": 100000, "checks": 2, "stats": { "played": 10, "won": 4, "lost": 6 } },
+          { "id": "p7", "name": "Pak Jeff Ma", "type": "monthly", "fee": 100000, "checks": 3, "stats": { "played": 11, "won": 7, "lost": 4 } },
+          { "id": "p8", "name": "Pak R.Tambunan", "type": "monthly", "fee": 100000, "checks": 3, "stats": { "played": 15, "won": 9, "lost": 6 } },
+          { "id": "p9", "name": "Pak G.Sagala", "type": "monthly", "fee": 100000, "checks": 4, "stats": { "played": 16, "won": 11, "lost": 5 } },
+          { "id": "p10", "name": "Pak M.F.Gultom", "type": "monthly", "fee": 100000, "checks": 2, "stats": { "played": 9, "won": 4, "lost": 5 } },
+          { "id": "p11", "name": "Pak E.Sitorus", "type": "per_play", "fee": 25000, "checks": 7, "stats": { "played": 18, "won": 10, "lost": 8 } },
+          { "id": "p12", "name": "Pak J. Siagian", "type": "per_play", "fee": 25000, "checks": 1, "stats": { "played": 4, "won": 1, "lost": 3 } },
+          { "id": "p13", "name": "Pak F. Tripika", "type": "per_play", "fee": 25000, "checks": 2, "stats": { "played": 8, "won": 5, "lost": 3 } },
+          { "id": "p14", "name": "Pak H. Sihotang", "type": "per_play", "fee": 25000, "checks": 1, "stats": { "played": 3, "won": 1, "lost": 2 } }
         ];
 
         const INITIAL_TRANSACTIONS = [
-          { id: 't1', type: 'credit', amount: 3325000, description: "Iuran kumulatif seluruh anggota (Hutagalung dkk)", date: "2026-06-02", note: "Saldo Kas Terkumpul" },
-          { id: 't2', type: 'debit', amount: 3026000, description: "Uang keluar (Sewa Lapangan, Kok, Konsumsi)", date: "2026-06-02", note: "Total Biaya Pengeluaran Sebelumnya" }
+          { "id": "t1", "type": "credit", "amount": 3325000, "description": "Iuran kumulatif seluruh anggota (Hutagalung dkk)", "date": "2026-06-02", "note": "Saldo Kas Terkumpul" },
+          { "id": "t2", "type": "debit", "amount": 3026000, "description": "Uang keluar (Sewa Lapangan, Kok, Konsumsi)", "date": "2026-06-02", "note": "Total Biaya Pengeluaran Sebelumnya" }
         ];
 
         const INITIAL_SESSIONS = [
           {
-            id: 's1',
-            date: '2026-06-08',
-            day: 'Senin',
-            location: 'Axton Arena MB2',
-            court: 'Court 3',
-            time: '19:00 - 21:00',
-            courtCost: DEFAULT_COURT_COST_PER_HOUR * 2,
-            shuttlecockCost: DEFAULT_SHUTTLECOCK_COST_PER_PACK,
-            rsvps: {} 
+            "id": "s1",
+            "date": "2026-06-08",
+            "day": "Senin",
+            "location": "Axton Arena MB2",
+            "court": "Court 3",
+            "time": "19:00 - 21:00",
+            "courtCost": 110000,
+            "shuttlecockCost": 145000,
+            "rsvps": { "p3": "YES", "p2": "MAYBE" }
           }
         ];
 
+        const INITIAL_TACTICAL = [
+            { id: 'tp1', label: 'T1-A', x: 75, y: 150, color: '#3B82F6' },
+            { id: 'tp2', label: 'T1-B', x: 75, y: 250, color: '#3B82F6' },
+            { id: 'tp3', label: 'T2-A', x: 225, y: 150, color: '#EF4444' },
+            { id: 'tp4', label: 'T2-B', x: 225, y: 250, color: '#EF4444' },
+        ];
+
+        // --- SISTEM LOAD DATA CERDAS ---
+        const loadInitialData = () => {
+            try {
+                const local = localStorage.getItem('gki_bs_data');
+                if (local) return JSON.parse(local);
+            } catch (e) {}
+            return {
+                players: INITIAL_PLAYERS,
+                sessions: INITIAL_SESSIONS,
+                transactions: INITIAL_TRANSACTIONS,
+                matches: [],
+                tacticalPlayers: INITIAL_TACTICAL,
+                updatedAt: 0
+            };
+        };
+
         function App() {
           const [activeTab, setActiveTab] = useState('dashboard');
-          const [players, setPlayers] = useState(INITIAL_PLAYERS);
-          const [sessions, setSessions] = useState(INITIAL_SESSIONS);
-          const [transactions, setTransactions] = useState(INITIAL_TRANSACTIONS);
-          const [matches, setMatches] = useState([
-            { id: 'm1', team1: ['Pak T. H. Hutagalung', 'Pak Handi Muliawan'], team2: ['Pak N. Sitohang', 'Pak G.Sagala'], score1: 21, score2: 18, date: '2026-06-02' }
-          ]);
           
+          // --- REACT STATE BERBASIS DATA LOKAL ---
+          const initialData = loadInitialData();
+          const [players, setPlayers] = useState(initialData.players);
+          const [sessions, setSessions] = useState(initialData.sessions);
+          const [transactions, setTransactions] = useState(initialData.transactions);
+          const [matches, setMatches] = useState(initialData.matches);
+          const [tacticalPlayers, setTacticalPlayers] = useState(initialData.tacticalPlayers);
+
+          // Referensi memori terpadu agar penulisan sinkron instan
+          const stateRef = useRef(initialData);
+          const localUpdatedAt = useRef(initialData.updatedAt || 0);
+
           // Form State
           const [newPlayerName, setNewPlayerName] = useState('');
           const [newPlayerType, setNewPlayerType] = useState('monthly');
@@ -109,6 +134,7 @@
           const [txAmount, setTxAmount] = useState('');
           const [txDesc, setTxDesc] = useState('');
           const [txPlayerId, setTxPlayerId] = useState('');
+          const [txSlip, setTxSlip] = useState(null);
           
           // Scoreboard Live State
           const [dPlayer1, setDPlayer1] = useState('');
@@ -119,16 +145,10 @@
           const [scoreB, setScoreB] = useState(0);
 
           const [notification, setNotification] = useState(null);
-          const [isSyncing, setIsSyncing] = useState(false);
-          const [workspaceUrl, setWorkspaceUrl] = useState('GKI_BS_DEFAULT_ROOM');
+          const [workspaceUrl, setWorkspaceUrl] = useState('');
+          const [selectedSlip, setSelectedSlip] = useState(null);
 
           const canvasRef = useRef(null);
-          const [tacticalPlayers, setTacticalPlayers] = useState([
-            { id: 'tp1', label: 'T1-A', x: 75, y: 150, color: '#3B82F6' },
-            { id: 'tp2', label: 'T1-B', x: 75, y: 250, color: '#3B82F6' },
-            { id: 'tp3', label: 'T2-A', x: 225, y: 150, color: '#EF4444' },
-            { id: 'tp4', label: 'T2-B', x: 225, y: 250, color: '#EF4444' },
-          ]);
           const [draggingId, setDraggingId] = useState(null);
           
           // Firebase Auth & Connection State
@@ -137,187 +157,127 @@
           const [diagnosticLogs, setDiagnosticLogs] = useState([]);
           const [firebaseErrorMessage, setFirebaseErrorMessage] = useState('');
 
-          // Modal Konfirmasi Kustom untuk iFrame (Sesuai Aturan: No Browser Alerts/Confirms)
-          const [confirmModal, setConfirmModal] = useState({
-            isOpen: false,
-            title: '',
-            message: '',
-            onConfirm: null
-          });
-
-          // Proteksi Sinkronisasi Siklus Ganda
-          const localVersion = useRef(1); 
-          const cloudVersion = useRef(0); 
-          const isListeningToCloud = useRef(false);
+          const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: null });
 
           const addLog = (msg) => {
             const time = new Date().toLocaleTimeString('id-ID');
             setDiagnosticLogs(prev => [...prev, `[${time}] ${msg}`]);
           };
 
-          // --- LEVEL 1: PROSES AUTENTIKASI UTAMA (MANDATORY RULE 3 - AUTH FIRST) ---
+          // =========================================================================
+          // ENGINE SINKRONISASI BARU (EVENT-DRIVEN & CONFLICT-FREE)
+          // =========================================================================
+
+          // FUNGSI INTI PENULISAN: Menyimpan ke lokal & Mendorong ke Cloud jika terhubung
+          const persistData = (updatedFields) => {
+            const newTimestamp = Date.now(); // Stempel waktu aktual memastikan anti-tabrakan
+            const payload = {
+                players: stateRef.current.players,
+                sessions: stateRef.current.sessions,
+                transactions: stateRef.current.transactions,
+                matches: stateRef.current.matches,
+                tacticalPlayers: stateRef.current.tacticalPlayers,
+                ...updatedFields,
+                updatedAt: newTimestamp
+            };
+
+            // 1. Simpan di Memori Ref instan
+            stateRef.current = payload;
+            localUpdatedAt.current = newTimestamp;
+
+            // 2. Simpan di Local Storage Browser
+            localStorage.setItem('gki_bs_data', JSON.stringify(payload));
+
+            // 3. Tulis Langsung Ke Cloud (Hanya jika terhubung dan login berhasil!)
+            if (cloudStatus === 'connected' && workspaceUrl && user) {
+                db.collection('artifacts').doc(appId).collection('public').doc('data').collection('gki_bs_rooms').doc(workspaceUrl)
+                  .set(payload)
+                  .catch(err => {
+                      console.error("Gagal mengirim ke cloud:", err);
+                      addLog("⚠️ Jaringan putus sesaat. Data tersimpan di memori perangkat.");
+                  });
+            }
+          };
+
+          // TAHAP 1: OTENTIKASI ANONIM (MANDATORY RULE 3)
           useEffect(() => {
-            const initAuth = async () => {
-              addLog("Memulai Autentikasi Keamanan Cloud...");
+            const doAuth = async () => {
+              addLog("Memeriksa kredensial identitas anonim...");
               try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                  addLog("Menggunakan Token Keamanan khusus...");
                   await auth.signInWithCustomToken(__initial_auth_token);
                 } else {
-                  addLog("Menghubungkan secara Anonim ke Google Firebase...");
                   await auth.signInAnonymously();
                 }
-              } catch (authError) {
-                addLog(`⚠️ Hambatan Masuk: ${authError.message}`);
-                // Jika token kustom gagal, fallback ke login anonim
-                try {
-                  await auth.signInAnonymously();
-                } catch (retryError) {
-                  addLog(`❌ Kegagalan Kritis Masuk Anonim: ${retryError.message}`);
-                }
+              } catch (error) {
+                addLog(`❌ Gagal masuk jaringan: ${error.message}`);
+                setCloudStatus('offline_fallback');
+                setFirebaseErrorMessage(`Otentikasi Anonim Ditolak: ${error.message}`);
               }
             };
+            doAuth();
 
-            initAuth();
-
-            const unsubscribeAuth = auth.onAuthStateChanged((currentUser) => {
+            const unsubAuth = auth.onAuthStateChanged(currentUser => {
               if (currentUser) {
-                addLog(`👤 Autentikasi Berhasil! Pengguna ID: ${currentUser.uid}`);
+                addLog(`👤 Identitas disetujui. UID: ${currentUser.uid.substring(0,6)}...`);
                 setUser(currentUser);
-              } else {
-                addLog("👤 Pengguna tidak terdaftar.");
-                setUser(null);
               }
             });
-
-            return () => unsubscribeAuth();
+            return () => unsubAuth();
           }, []);
 
-          // --- LEVEL 2: PROSES SINKRONISASI FIRESTORE (MANDATORY RULE 3 - GUARDED BY USER) ---
+          // TAHAP 2: PEMANTAUAN RUANG DATA FIRESTORE
           useEffect(() => {
-            if (!user) {
-              addLog("Menunggu otorisasi keamanan sebelum mengunduh data...");
-              return;
-            }
+            if (!user) return; // Gerbang Pengaman: Tunggu login selesai
 
             const params = new URLSearchParams(window.location.search);
-            const paramWorkspace = params.get('workspace');
-            const activeRoomId = paramWorkspace || 'GKI_BS_DEFAULT_ROOM';
+            const activeRoomId = params.get('workspace') || 'GKI_BS_DEFAULT_ROOM';
             setWorkspaceUrl(activeRoomId);
 
-            addLog(`📡 Membuka koneksi cloud untuk Room Workspace: #${activeRoomId}...`);
+            addLog(`📡 Mengetuk pintu server Room: #${activeRoomId}...`);
 
-            // Batas waktu tunggu jaringan (4 detik)
-            const networkTimeout = setTimeout(() => {
-              setCloudStatus(prev => {
-                if (prev === 'pending') {
-                  addLog("⚠️ Jaringan lambat. Mengaktifkan Mode Luring Aman.");
-                  showToast("Berjalan dalam Mode Aman Luring! 💾", "info");
-                  return 'offline_fallback';
-                }
-                return prev;
-              });
-            }, 4000);
-
-            // Jalur Firestore Aman (MANDATORY RULE 1)
-            const docRef = db
-              .collection('artifacts')
-              .doc(appId)
-              .collection('public')
-              .doc('data')
-              .collection('gki_bs_rooms')
-              .doc(activeRoomId);
-
-            const unsubscribeFirestore = docRef.onSnapshot((snapshot) => {
-              clearTimeout(networkTimeout);
-              if (snapshot.exists()) {
-                const data = snapshot.data();
-                const remoteVersion = data.version || 0;
-
-                // Proteksi tabrakan data (Hanya ganti data lokal jika versi cloud lebih baru)
-                if (remoteVersion > localVersion.current || localVersion.current === 1) {
-                  isListeningToCloud.current = true;
+            const roomRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('gki_bs_rooms').doc(activeRoomId);
+            
+            const unsubFirestore = roomRef.onSnapshot(doc => {
+              if (doc.exists) {
+                const cloudData = doc.data();
+                // RESOLUSI RACE CONDITION: Hanya terima jika waktu pembaruan Cloud LEBIH BARU dari aktivitas lokal terakhir
+                if (cloudData.updatedAt > localUpdatedAt.current) {
+                  addLog("📥 Menerima paket data Skuad terbaru dari Cloud!");
                   
-                  if (data.players) setPlayers(data.players);
-                  if (data.sessions) setSessions(data.sessions);
-                  if (data.transactions) setTransactions(data.transactions);
-                  if (data.matches) setMatches(data.matches);
-                  if (data.tacticalPlayers) setTacticalPlayers(data.tacticalPlayers);
+                  localUpdatedAt.current = cloudData.updatedAt;
+                  stateRef.current = cloudData;
                   
-                  localVersion.current = remoteVersion;
-                  cloudVersion.current = remoteVersion;
-
-                  setCloudStatus('connected');
-                  addLog(`✅ Data Cloud Terbaru Berhasil Sinkron (v${remoteVersion})`);
-
-                  setTimeout(() => {
-                    isListeningToCloud.current = false;
-                  }, 120);
-                } else {
-                  addLog(`ℹ️ Update cloud diabaikan karena versi lokal lebih baru (Cloud: v${remoteVersion}, Lokal: v${localVersion.current})`);
+                  // Sinkronkan ke tampilan Layar
+                  setPlayers(cloudData.players || INITIAL_PLAYERS);
+                  setSessions(cloudData.sessions || INITIAL_SESSIONS);
+                  setTransactions(cloudData.transactions || INITIAL_TRANSACTIONS);
+                  setMatches(cloudData.matches || []);
+                  setTacticalPlayers(cloudData.tacticalPlayers || INITIAL_TACTICAL);
+                  
+                  // Backup ke Storage Browser pengguna
+                  localStorage.setItem('gki_bs_data', JSON.stringify(cloudData));
                 }
               } else {
-                addLog(`Room #${activeRoomId} kosong di cloud. Siap mengunggah data lokal baru.`);
-                setCloudStatus('connected');
-                triggerStateSync();
+                addLog(`🆕 Membuka Room #${activeRoomId} perdana. Memasukkan data lokal...`);
+                // Ruang kosong? Mari kita isi dengan data lokal pengguna ini.
+                persistData({}); 
               }
-            }, (firestoreError) => {
-              clearTimeout(networkTimeout);
+              setCloudStatus('connected');
+            }, err => {
+              addLog(`❌ Firebase memblokir koneksi: ${err.message}`);
               setCloudStatus('error_firestore');
-              setFirebaseErrorMessage(firestoreError.message);
-              addLog(`❌ KENDALA FIRESTORE: ${firestoreError.message}`);
+              setFirebaseErrorMessage(`Firebase Rule Tertutup: ${err.message}`);
             });
 
-            return () => {
-              clearTimeout(networkTimeout);
-              if (unsubscribeFirestore) unsubscribeFirestore();
-            };
-          }, [user, workspaceUrl]);
+            return () => unsubFirestore();
+          }, [user]);
 
-          // --- LEVEL 3: ENGINE AUTO-SAVE CLOUD INSTAN (MANDATORY RULE 3 - GUARDED) ---
-          useEffect(() => {
-            if (!user) return; // Mencegah penulisan data sebelum terautentikasi
-            if (isListeningToCloud.current) return; // Mencegah data cloud tertimpa balik oleh data lama
-
-            if (db && cloudStatus === 'connected' && workspaceUrl && localVersion.current > cloudVersion.current) {
-              const targetVersion = localVersion.current;
-              cloudVersion.current = targetVersion; 
-
-              const payload = { 
-                players, 
-                sessions, 
-                transactions, 
-                matches, 
-                tacticalPlayers, 
-                version: targetVersion,
-                updatedAt: new Date().toISOString() 
-              };
-              
-              const docRef = db
-                .collection('artifacts')
-                .doc(appId)
-                .collection('public')
-                .doc('data')
-                .collection('gki_bs_rooms')
-                .doc(workspaceUrl);
-
-              docRef.set(JSON.parse(JSON.stringify(payload))).then(() => {
-                addLog(`🔄 Sinkronisasi otomatis sukses ke cloud (v${targetVersion})!`);
-              }).catch(err => {
-                console.error("Auto-sync error:", err);
-                addLog(`⚠️ Sinkronisasi otomatis tertunda: ${err.message}`);
-                cloudVersion.current = targetVersion - 1; // Rollback versi agar bisa dicoba kembali
-              });
-            }
-          }, [players, sessions, transactions, matches, tacticalPlayers, db, cloudStatus, workspaceUrl, user]);
-
-          const triggerStateSync = () => {
-            localVersion.current = Math.max(localVersion.current, cloudVersion.current) + 1;
-          };
+          // =========================================================================
 
           const showToast = (message, type = 'info') => {
             setNotification({ message, type });
-            setTimeout(() => setNotification(null), 4000);
+            setTimeout(() => setNotification(null), 3000);
           };
 
           const openConfirm = (title, message, onConfirm) => {
@@ -332,53 +292,6 @@
             });
           };
 
-          const publishToCloud = async () => {
-            let activeRoomId = workspaceUrl;
-            if (!activeRoomId || activeRoomId === 'GKI_BS_DEFAULT_ROOM') {
-              activeRoomId = 'GKI_BS_' + Math.random().toString(36).substring(2, 8).toUpperCase();
-              setWorkspaceUrl(activeRoomId);
-              const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + `?workspace=${activeRoomId}`;
-              window.history.replaceState({ path: newUrl }, '', newUrl);
-            }
-
-            if (!user || !db || cloudStatus !== 'connected') {
-              showToast("Gagal menyimpan ke cloud. Backup JSON diunduh lokal! 💾", "info");
-              exportBackupJson();
-              return;
-            }
-
-            setIsSyncing(true);
-            try {
-              triggerStateSync();
-              const payload = { 
-                players, 
-                sessions, 
-                transactions, 
-                matches, 
-                tacticalPlayers, 
-                version: localVersion.current,
-                updatedAt: new Date().toISOString() 
-              };
-              
-              const docRef = db
-                .collection('artifacts')
-                .doc(appId)
-                .collection('public')
-                .doc('data')
-                .collection('gki_bs_rooms')
-                .doc(activeRoomId);
-
-              await docRef.set(JSON.parse(JSON.stringify(payload)));
-              showToast(`Data Sinkron ke Room: #${activeRoomId}! 🚀`, "success");
-            } catch (err) {
-              console.error(err);
-              showToast("Gagal menyimpan ke cloud.", "error");
-              exportBackupJson();
-            } finally {
-              setIsSyncing(false);
-            }
-          };
-
           const copyWorkspaceLink = () => {
             let activeRoomId = workspaceUrl;
             if (!activeRoomId || activeRoomId === 'GKI_BS_DEFAULT_ROOM') {
@@ -389,11 +302,13 @@
             }
             const shareUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + `?workspace=${activeRoomId}`;
             copyTextToClipboard(shareUrl);
-            showToast(`Tautan khusus Room #${activeRoomId} berhasil disalin! Silakan bagikan ke WhatsApp. 📲`, "success");
+            showToast(`Tautan Room Skuad berhasil disalin! Silakan bagikan. 📲`, "success");
+            persistData({}); // Pancing pendaftaran ID Room ke cloud
           };
 
           const exportBackupJson = () => {
-            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ players, sessions, transactions, matches }, null, 2));
+            const payload = { players, sessions, transactions, matches, tacticalPlayers };
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(payload, null, 2));
             const downloadAnchor = document.createElement('a');
             downloadAnchor.setAttribute("href", dataStr);
             downloadAnchor.setAttribute("download", `gki_bs_backup.json`);
@@ -411,27 +326,59 @@
                 if (parsed.sessions) setSessions(parsed.sessions);
                 if (parsed.transactions) setTransactions(parsed.transactions);
                 if (parsed.matches) setMatches(parsed.matches);
-                showToast("Data Impor Berhasil! ✅", "success");
-                triggerStateSync();
+                persistData(parsed);
+                showToast("Data Impor Berhasil Diterapkan & Mengudara! ✅", "success");
               } catch (err) {
-                showToast("Format Berkas Salah! ❌", "error");
+                showToast("Format Berkas JSON Salah! ❌", "error");
               }
             };
             if (e.target.files[0]) fileReader.readAsText(e.target.files[0]);
+          };
+
+          // Kompresi Gambar Nota Cerdas
+          const handleSlipImageUpload = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              const img = new Image();
+              img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const max_size = 400; // Dikompres ke 400px agar ringan dikirim di jaringan lambat
+                let width = img.width;
+                let height = img.height;
+                if (width > height) {
+                  if (width > max_size) { height *= max_size / width; width = max_size; }
+                } else {
+                  if (height > max_size) { width *= max_size / height; height = max_size; }
+                }
+                canvas.width = width; canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.7); // 70% quality JPG
+                setTxSlip(dataUrl);
+                showToast("Bukti nota siap! 📸", "success");
+              };
+              img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
           };
 
           const totalUangMasuk = transactions.filter(t => t.type === 'credit').reduce((sum, t) => sum + t.amount, 0);
           const totalUangKeluar = transactions.filter(t => t.type === 'debit').reduce((sum, t) => sum + t.amount, 0);
           const saldoKas = totalUangMasuk - totalUangKeluar;
 
+          // --- LOGIKA EVENT HANDLERS DENGAN AUTOSAVE INSTAN ---
           const incrementCheck = (id) => {
-            setPlayers(prev => prev.map(p => p.id === id ? { ...p, checks: p.checks + 1 } : p));
-            triggerStateSync();
+            const updated = players.map(p => p.id === id ? { ...p, checks: p.checks + 1 } : p);
+            setPlayers(updated);
+            persistData({ players: updated });
           };
 
           const decrementCheck = (id) => {
-            setPlayers(prev => prev.map(p => p.id === id && p.checks > 0 ? { ...p, checks: p.checks - 1 } : p));
-            triggerStateSync();
+            const updated = players.map(p => p.id === id && p.checks > 0 ? { ...p, checks: p.checks - 1 } : p);
+            setPlayers(updated);
+            persistData({ players: updated });
           };
 
           const addNewPlayer = (e) => {
@@ -439,18 +386,14 @@
             if (!newPlayerName.trim()) return;
             const isMonthly = newPlayerType === 'monthly';
             const newP = {
-              id: 'p_' + Date.now(),
-              name: newPlayerName.trim(),
-              type: newPlayerType,
-              fee: isMonthly ? 100000 : 25000,
-              checks: Number(newPlayerChecks) || 0,
-              stats: { played: 0, won: 0, lost: 0 }
+              id: 'p_' + Date.now(), name: newPlayerName.trim(), type: newPlayerType,
+              fee: isMonthly ? 100000 : 25000, checks: Number(newPlayerChecks) || 0, stats: { played: 0, won: 0, lost: 0 }
             };
-            setPlayers(prev => [...prev, newP]);
-            setNewPlayerName('');
-            setNewPlayerChecks(0);
+            const updated = [...players, newP];
+            setPlayers(updated);
+            setNewPlayerName(''); setNewPlayerChecks(0);
             showToast(`${newP.name} Terdaftar!`, "success");
-            triggerStateSync();
+            persistData({ players: updated });
           };
 
           const handleQuickAddGuest = (sessionId, e) => {
@@ -458,30 +401,24 @@
             if (!guestName.trim()) return;
             const newGuestId = 'p_guest_' + Date.now();
             const newGuest = {
-              id: newGuestId,
-              name: guestName.trim() + " (Tamu)",
-              type: guestType,
-              fee: guestType === 'monthly' ? 100000 : 25000,
-              checks: 0,
-              stats: { played: 0, won: 0, lost: 0 }
+              id: newGuestId, name: guestName.trim() + " (Tamu)", type: guestType,
+              fee: guestType === 'monthly' ? 100000 : 25000, checks: 0, stats: { played: 0, won: 0, lost: 0 }
             };
-            setPlayers(prev => [...prev, newGuest]);
-            setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, rsvps: { ...s.rsvps, [newGuestId]: 'YES' } } : s));
-            setGuestName('');
+            const updatedPlayers = [...players, newGuest];
+            const updatedSessions = sessions.map(s => s.id === sessionId ? { ...s, rsvps: { ...s.rsvps, [newGuestId]: 'YES' } } : s);
+            
+            setPlayers(updatedPlayers); setSessions(updatedSessions); setGuestName('');
             showToast(`${newGuest.name} Ditambahkan ke RSVP! ✅`, "success");
-            triggerStateSync();
+            persistData({ players: updatedPlayers, sessions: updatedSessions });
           };
 
           const removePlayer = (id, name) => {
-            openConfirm(
-              "Hapus Anggota Skuad",
-              `Apakah bapak yakin ingin menghapus ${name} dari daftar anggota inti GKI-BS?`,
-              () => {
-                setPlayers(prev => prev.filter(p => p.id !== id));
-                showToast("Pemain berhasil dihapus.");
-                triggerStateSync();
-              }
-            );
+            openConfirm("Hapus Anggota Skuad", `Yakin ingin mencoret ${name} dari daftar anggota GKI-BS?`, () => {
+              const updated = players.filter(p => p.id !== id);
+              setPlayers(updated);
+              showToast("Pemain berhasil dihapus.");
+              persistData({ players: updated });
+            });
           };
 
           const addTransaction = (e) => {
@@ -489,77 +426,85 @@
             const parsedAmount = parseFloat(txAmount);
             if (isNaN(parsedAmount) || parsedAmount <= 0 || !txDesc.trim()) { showToast("Input tidak valid!", "error"); return; }
             let finalDesc = txDesc;
+            let updatedPlayers = players;
+
             if (txType === 'credit' && txPlayerId) {
               const p = players.find(x => x.id === txPlayerId);
-              if (p) { finalDesc = `Bayar Iuran - ${p.name}: ${txDesc}`; incrementCheck(txPlayerId); }
+              if (p) { 
+                finalDesc = `Bayar Iuran - ${p.name}: ${txDesc}`; 
+                updatedPlayers = players.map(x => x.id === txPlayerId ? { ...x, checks: x.checks + 1 } : x);
+                setPlayers(updatedPlayers);
+              }
             }
+            
             const newTx = {
               id: 't_' + Date.now(), type: txType, amount: parsedAmount, description: finalDesc,
-              date: new Date().toISOString().slice(0,10), note: txType === 'credit' ? 'Uang Masuk / Iuran' : 'Uang Keluar / Biaya'
+              date: new Date().toISOString().slice(0,10), note: txType === 'credit' ? 'Uang Masuk / Iuran' : 'Uang Keluar / Biaya',
+              slip: txSlip // Gambar base64
             };
-            setTransactions(prev => [newTx, ...prev]);
-            setTxAmount(''); setTxDesc(''); setTxPlayerId('');
-            showToast("Transaksi Masuk Jurnal! 💰", "success");
-            triggerStateSync();
+            const updatedTransactions = [newTx, ...transactions];
+            setTransactions(updatedTransactions);
+            setTxAmount(''); setTxDesc(''); setTxPlayerId(''); setTxSlip(null);
+            showToast("Transaksi Jurnal Tercatat! 💰", "success");
+            persistData({ transactions: updatedTransactions, players: updatedPlayers });
           };
 
           const removeTransaction = (id) => {
-            openConfirm(
-              "Hapus Catatan Jurnal",
-              "Apakah bapak yakin ingin menghapus catatan transaksi keuangan kas ini?",
-              () => {
-                setTransactions(prev => prev.filter(t => t.id !== id));
-                showToast("Catatan kas terhapus.");
-                triggerStateSync();
-              }
-            );
+            openConfirm("Hapus Catatan Jurnal", "Hapus catatan transaksi keuangan ini dari pembukuan?", () => {
+              const updated = transactions.filter(t => t.id !== id);
+              setTransactions(updated);
+              showToast("Catatan kas terhapus.");
+              persistData({ transactions: updated });
+            });
           };
 
           const handleRsvpChange = (sessionId, playerId, status) => {
-            setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, rsvps: { ...s.rsvps, [playerId]: status } } : s));
-            triggerStateSync();
+            const updated = sessions.map(s => s.id === sessionId ? { ...s, rsvps: { ...s.rsvps, [playerId]: status } } : s);
+            setSessions(updated);
+            persistData({ sessions: updated });
           };
 
           const resetAllRsvps = (sessionId) => {
-            openConfirm(
-              "Kosongkan RSVP Skuad",
-              "Apakah bapak yakin ingin mengosongkan seluruh kehadiran pemain untuk sesi ini?",
-              () => {
-                setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, rsvps: {} } : s));
-                showToast("RSVP dikosongkan! 🔄", "success");
-                triggerStateSync();
-              }
-            );
+            openConfirm("Kosongkan RSVP Skuad", "Yakin ingin mengosongkan seluruh konfirmasi kehadiran?", () => {
+              const updated = sessions.map(s => s.id === sessionId ? { ...s, rsvps: {} } : s);
+              setSessions(updated);
+              showToast("RSVP dikosongkan! 🔄", "success");
+              persistData({ sessions: updated });
+            });
           };
 
           const saveMatchResult = () => {
-            if (!dPlayer1 || !dPlayer2 || !dPlayer3 || !dPlayer4 || scoreA === scoreB) { showToast("Konfigurasi skor/pemain salah!", "error"); return; }
+            if (!dPlayer1 || !dPlayer2 || !dPlayer3 || !dPlayer4 || scoreA === scoreB) { showToast("Konfigurasi skuad/skor salah!", "error"); return; }
             const nameA1 = players.find(p => p.id === dPlayer1)?.name || 'Pemain A1';
             const nameA2 = players.find(p => p.id === dPlayer2)?.name || 'Pemain A2';
             const nameB1 = players.find(p => p.id === dPlayer3)?.name || 'Pemain B1';
             const nameB2 = players.find(p => p.id === dPlayer4)?.name || 'Pemain B2';
             const newMatch = { id: 'm_' + Date.now(), team1: [nameA1, nameA2], team2: [nameB1, nameB2], score1: scoreA, score2: scoreB, date: new Date().toISOString().slice(0, 10) };
+            
             const winningTeam = scoreA > scoreB ? 'team1' : 'team2';
             const activePlayerIds = [dPlayer1, dPlayer2, dPlayer3, dPlayer4];
-            setPlayers(prev => prev.map(p => {
+            
+            const updatedPlayers = players.map(p => {
               if (activePlayerIds.includes(p.id)) {
                 const isTeam1 = p.id === dPlayer1 || p.id === dPlayer2;
                 const won = (isTeam1 && winningTeam === 'team1') || (!isTeam1 && winningTeam === 'team2');
                 return { ...p, stats: { played: (p.stats?.played || 0) + 1, won: (p.stats?.won || 0) + (won ? 1 : 0), lost: (p.stats?.lost || 0) + (won ? 0 : 1) } };
               }
               return p;
-            }));
-            setMatches(prev => [newMatch, ...prev]); 
-            showToast("Hasil Game Disimpan! 🏆", "success"); 
-            setScoreA(0); 
-            setScoreB(0);
-            triggerStateSync();
+            });
+            const updatedMatches = [newMatch, ...matches];
+            
+            setPlayers(updatedPlayers); setMatches(updatedMatches); 
+            showToast("Hasil Game Diabadikan! 🏆", "success"); 
+            setScoreA(0); setScoreB(0);
+            persistData({ players: updatedPlayers, matches: updatedMatches });
           };
 
           const copyKeuanganWhatsApp = () => {
             const playerLines = players.map(p => `${p.name} ${"✅".repeat(p.checks)} ${p.type === 'monthly' ? "payment monthly rp 100000" : "payment per play Rp25.000,."}`).join('\n');
-            const template = `Selamat pagi Bapak" Badminton, update keuangan Badminton hari ini :\n${playerLines}\n*Total Iuran Rp ${totalUangMasuk.toLocaleString('id-ID')},.*\n\n*Saldo Kas Badminton Rp ${saldoKas.toLocaleString('id-ID')},.*\n( Uang masuk Rp ${totalUangMasuk.toLocaleString('id-ID')},  -  Uang keluar ${totalUangKeluar.toLocaleString('id-ID')} )`;
+            const template = `Selamat pagi Bapak" Badminton GKI-BS, update keuangan Badminton hari ini :\n${playerLines}\n*Total Iuran Rp ${totalUangMasuk.toLocaleString('id-ID')},.*\n\n*Saldo Kas Badminton Rp ${saldoKas.toLocaleString('id-ID')},.*\n( Uang masuk Rp ${totalUangMasuk.toLocaleString('id-ID')},  -  Uang keluar ${totalUangKeluar.toLocaleString('id-ID')} )`;
             copyTextToClipboard(template);
+            showToast("Format laporan keuangan disalin ke clipboard! 📲", "success");
           };
 
           const copyRsvpWhatsApp = (session) => {
@@ -573,6 +518,7 @@
             });
             const template = `🏸 *GKI-BS Badminton Play RSVP* 🏸\n*Jadwal:* ${session.date} | ${session.time}\n*Tempat:* ${session.location} (${session.court})\n\n*Daftar Hadir (${yesList.length}):*\n${yesList.map((n,i)=>`${i+1}. ${n} ✅`).join('\n')}\n\n*Belum Konfirmasi:* ${blankList.join(', ')}`;
             copyTextToClipboard(template);
+            showToast("Format list RSVP disalin ke clipboard! 📲", "success");
           };
 
           const copyTextToClipboard = (text) => {
@@ -611,9 +557,7 @@
             if (e.touches.length === 1) {
               const touch = e.touches[0];
               const rect = canvasRef.current.getBoundingClientRect();
-              const x = touch.clientX - rect.left;
-              const y = touch.clientY - rect.top;
-              const match = tacticalPlayers.find(p => Math.hypot(p.x - x, p.y - y) < 25);
+              const match = tacticalPlayers.find(p => Math.hypot(p.x - (touch.clientX - rect.left), p.y - (touch.clientY - rect.top)) < 25);
               if (match) setDraggingId(match.id);
             }
           };
@@ -623,16 +567,12 @@
             if (e.touches.length === 1) {
               const touch = e.touches[0];
               const rect = canvasRef.current.getBoundingClientRect();
-              const x = touch.clientX - rect.left;
-              const y = touch.clientY - rect.top;
-              setTacticalPlayers(prev => prev.map(p => p.id === draggingId ? { ...p, x, y } : p));
+              setTacticalPlayers(prev => prev.map(p => p.id === draggingId ? { ...p, x: touch.clientX - rect.left, y: touch.clientY - rect.top } : p));
             }
           };
 
           const handleCanvasMouseUpOrLeave = () => {
-            if (draggingId) {
-              triggerStateSync();
-            }
+            if (draggingId) persistData({ tacticalPlayers });
             setDraggingId(null);
           };
 
@@ -669,7 +609,7 @@
                 <div className="max-w-7xl mx-auto h-16 flex items-center justify-between flex-wrap gap-2 py-2">
                   <div>
                     <h1 className="text-lg font-bold bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent">GKI-BS Badminton Play</h1>
-                    <p className="text-xs text-gray-400">Cloud Sync &amp; Ledger Organizer</p>
+                    <p className="text-xs text-gray-400">Cloud Sync &amp; Local Ledger Organizer</p>
                   </div>
                   
                   {/* Indikator Status Database */}
@@ -677,59 +617,53 @@
                     <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold ${
                       cloudStatus === 'connected' ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-800/60' :
                       cloudStatus === 'pending' ? 'bg-amber-950/80 text-amber-400 border border-amber-800/60 animate-pulse' :
-                      'bg-red-950/80 text-red-400 border border-red-800/60'
+                      'bg-gray-900 text-gray-400 border border-gray-800'
                     }`}>
                       <span className={`w-1.5 h-1.5 rounded-full ${
                         cloudStatus === 'connected' ? 'bg-emerald-400' :
                         cloudStatus === 'pending' ? 'bg-amber-400 animate-ping' :
-                        'bg-red-400'
+                        'bg-gray-500'
                       }`} />
-                      {cloudStatus === 'connected' ? `Terhubung Room: #${workspaceUrl}` :
-                       cloudStatus === 'pending' ? 'Menghubungkan...' :
-                       'Aman (Mode Luring) 💾'}
+                      {cloudStatus === 'connected' ? `Live Room: #${workspaceUrl}` :
+                       cloudStatus === 'pending' ? 'Mengunci Cloud...' :
+                       'Luring / Standby Lokal 💾'}
                     </span>
                     <button onClick={copyWorkspaceLink} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-indigo-600/20">
-                      Bagikan Tautan Room 🔗
-                    </button>
-                    <button onClick={publishToCloud} className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-gray-950 text-xs font-bold rounded-xl transition-all shadow-lg shadow-emerald-500/20">
-                      Sync Manual 🚀
+                      Bagikan Link Undangan 🔗
                     </button>
                   </div>
                 </div>
               </header>
 
-              {/* PANEL DIAGNOSTIK UTAMA (MENUNTUN BAPAK UNTUK MENYELARASKAN AKUN GOOGLE FIREBASE) */}
-              {cloudStatus !== 'connected' && (
-                <div className="max-w-7xl mx-auto mt-4 mx-4 p-6 bg-red-950/20 border border-red-500/30 rounded-3xl text-sm text-red-200 shadow-2xl">
+              {/* PANEL DIAGNOSTIK OTOMATIS (MUNCUL JIKA ADA MASALAH FIREBASE) */}
+              {cloudStatus === 'error_firestore' && (
+                <div className="max-w-7xl mx-auto mt-4 mx-4 p-6 bg-amber-950/20 border border-amber-500/40 rounded-3xl text-sm text-amber-200 shadow-2xl">
                   <div className="flex items-center gap-2 mb-2">
                     <span className="text-lg">⚙️</span>
-                    <h3 className="font-extrabold text-base text-white">Panduan Solusi Jaringan Cloud Skuad</h3>
+                    <h3 className="font-extrabold text-base text-white">Panduan Pembukaan Blokir Cloud</h3>
                   </div>
                   <p className="text-xs text-gray-300 mb-4 leading-relaxed">
-                    Sistem mendeteksi bahwa situs web bapak tidak dapat menyimpan data ke database Cloud Firebase bapak. Hal ini biasanya terjadi karena domain bapak belum diizinkan secara resmi di panel akun Google Firebase bapak. Silakan ikuti dua langkah cepat di bawah ini:
+                    Sistem beralih ke <strong>Mode Luring Aman</strong> karena Google Firebase menolak permintaan dari link bapak. Supaya *share link* berfungsi bagi bapak-bapak GKI-BS lain, lakukan 2 langkah ini di <a href="https://console.firebase.google.com/" target="_blank" className="text-emerald-400 underline font-extrabold">Firebase Console</a> bapak:
                   </p>
                   
-                  {firebaseErrorMessage && (
-                    <div className="bg-black/50 p-4 rounded-2xl font-mono text-xs text-red-400 mb-5 border border-red-900/50 leading-relaxed break-all">
-                      <strong className="text-white block mb-1">Pesan Error Asli dari Google:</strong>
-                      {firebaseErrorMessage}
-                    </div>
-                  )}
+                  <div className="bg-black/50 p-4 rounded-2xl font-mono text-xs text-red-400 mb-5 border border-red-900/50">
+                    <strong className="text-white block mb-1">Pesan dari server:</strong> {firebaseErrorMessage}
+                  </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-gray-300">
                     <div className="bg-gray-950/80 p-5 rounded-2xl border border-gray-800 space-y-3">
-                      <span className="font-black text-emerald-400 text-sm block">1. Daftarkan Domain Bapak di Firebase</span>
+                      <span className="font-black text-emerald-400 text-sm block">1. Buka Jalur Domain GitHub</span>
                       <ol className="list-decimal pl-4 space-y-1.5 text-gray-300 leading-normal">
-                        <li>Buka <a href="https://console.firebase.google.com/" target="_blank" className="text-emerald-400 underline font-extrabold">Firebase Console Proyek Bapak</a>.</li>
-                        <li>Masuk ke menu <strong>Build</strong> &gt; <strong>Authentication</strong>.</li>
-                        <li>Klik tab <strong>Settings</strong> di kanan atas, lalu pilih menu **Authorized Domains** di bilah kiri.</li>
-                        <li>Klik **Add domain**, ketik: <strong className="text-white bg-black/40 px-1.5 py-0.5 rounded font-mono text-[11px]">handyman05-web.github.io</strong> lalu simpan.</li>
+                        <li>Buka menu <strong>Build</strong> &gt; <strong>Authentication</strong>.</li>
+                        <li>Pastikan tab **Sign-in method** &gt; **Anonymous** berstatus AKTIF (Enabled).</li>
+                        <li>Klik tab <strong>Settings</strong> &gt; **Authorized Domains**.</li>
+                        <li>Tambahkan domain web bapak: <strong className="text-white bg-black/40 px-1.5 py-0.5 rounded font-mono text-[11px]">handyman05-web.github.io</strong> lalu simpan.</li>
                       </ol>
                     </div>
                     <div className="bg-gray-950/80 p-5 rounded-2xl border border-gray-800 space-y-3">
-                      <span className="font-black text-emerald-400 text-sm block">2. Buka Hak Akses Tulis Firestore</span>
+                      <span className="font-black text-emerald-400 text-sm block">2. Izinkan Firestore Database</span>
                       <p className="leading-relaxed">
-                        Agar database dapat menerima penyimpanan data dari HP bapak-bapak di lapangan, pastikan bapak membuka aturan Firestore bapak di tab <strong>Cloud Firestore</strong> &gt; klik tab **Rules**, lalu ganti aturannya dengan kode di bawah:
+                        Buka tab <strong>Cloud Firestore</strong> &gt; <strong>Rules</strong>, lalu hapus aturan lama dan rekatkan kode ini:
                       </p>
                       <pre className="bg-black/60 p-3 rounded-lg text-blue-300 font-mono text-[10px] overflow-x-auto">
 {`rules_version = '2';
@@ -741,11 +675,32 @@ service cloud.firestore {
   }
 }`}
                       </pre>
-                      <span className="text-[10px] text-gray-400 block font-semibold">Klik tombol <strong>Publish</strong> setelah menempelkan aturan di atas, lalu segarkan halaman ini.</span>
+                      <span className="text-[10px] text-gray-400 block font-semibold">Klik tombol <strong>Publish</strong> lalu segarkan halaman web ini.</span>
                     </div>
                   </div>
                 </div>
               )}
+
+              {/* FITUR EKSPOR-IMPOR MANUAL (DIBUAT LEBIH JELAS) */}
+              <section className="max-w-7xl mx-auto mt-4 px-4">
+                <div className="bg-gray-900/60 border border-gray-800 p-5 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                      <span>📁</span> Brankas File Manual (JSON)
+                    </h3>
+                    <p className="text-xs text-gray-400">Cadangkan atau pulihkan data riwayat skuad bapak langsung ke memori telepon.</p>
+                  </div>
+                  <div className="flex items-center gap-3 w-full md:w-auto">
+                    <button onClick={exportBackupJson} className="flex-1 md:flex-initial px-5 py-2.5 bg-gray-800 hover:bg-gray-750 text-xs font-bold rounded-xl border border-gray-700 transition-all">
+                      📥 Unduh JSON
+                    </button>
+                    <label className="flex-1 md:flex-initial text-center px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-gray-950 text-xs font-bold rounded-xl cursor-pointer transition-all">
+                      📤 Pulihkan File
+                      <input type="file" accept=".json" onChange={importBackupJson} className="hidden" />
+                    </label>
+                  </div>
+                </div>
+              </section>
 
               <section className="bg-gradient-to-b from-gray-900 to-gray-950 py-6 px-4 border-b border-gray-900">
                 <div className="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -783,12 +738,12 @@ service cloud.firestore {
                           <div key={s.id} className="bg-gray-900 border border-gray-800 rounded-3xl p-6 shadow-xl space-y-6 animate-in fade-in duration-200">
                             <div className="flex justify-between border-b border-gray-800 pb-4 mb-4 flex-wrap gap-2">
                               <div>
-                                <span className="text-xs font-bold text-emerald-400 uppercase">Next Match</span>
+                                <span className="text-xs font-bold text-emerald-400 uppercase">Jadwal Skuad GKI-BS</span>
                                 <h3 className="text-lg font-bold text-white">{s.location} - {s.court}</h3>
-                                <p className="text-xs text-gray-400">{s.date} | {s.time} WIB</p>
+                                <p className="text-xs text-gray-400">{s.day}, {s.date} | {s.time} WIB</p>
                               </div>
                               <div className="flex gap-2 items-center">
-                                <button onClick={() => resetAllRsvps(s.id)} className="px-3 py-1.5 bg-gray-800 hover:bg-gray-750 text-xs font-bold rounded-lg transition-all">🔄 Reset</button>
+                                <button onClick={() => resetAllRsvps(s.id)} className="px-3 py-1.5 bg-gray-800 hover:bg-gray-750 text-xs font-bold rounded-lg transition-all">🔄 Reset Hadir</button>
                                 <button onClick={() => copyRsvpWhatsApp(s)} className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold rounded-lg transition-all">Salin List WA 📲</button>
                               </div>
                             </div>
@@ -846,7 +801,7 @@ service cloud.firestore {
 
                             {/* RSVP Selector List */}
                             <div className="space-y-2 border-t border-gray-800/60 pt-4">
-                              <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Ubah Status Mandiri Skuad:</h4>
+                              <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Pilih/Ubah Kehadiran Bapak-Bapak:</h4>
                               {players.map(p => {
                                 const status = s.rsvps?.[p.id] || 'NO_RESPONSE';
                                 return (
@@ -869,12 +824,11 @@ service cloud.firestore {
                     <div className="space-y-6">
                       <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl space-y-4">
                         <button onClick={copyKeuanganWhatsApp} className="w-full py-3 bg-teal-500 hover:bg-teal-400 text-gray-950 font-bold text-xs rounded-xl shadow transition-all">Salin Buku Keuangan WA 📲</button>
-                        <input type="file" accept=".json" onChange={importBackupJson} className="w-full text-xs text-gray-500" />
                         
-                        {/* Riwayat Jaringan Cloud */}
+                        {/* Riwayat Telemetri Sistem Log */}
                         <div className="mt-4 p-4 bg-black/60 rounded-2xl border border-gray-800 text-[10px] font-mono h-40 overflow-y-auto space-y-1">
                           <div className="text-emerald-400 font-bold border-b border-gray-800 pb-1 mb-1 flex justify-between items-center">
-                            <span>AKTIVITAS JARINGAN</span>
+                            <span>SISTEM LOG JARINGAN</span>
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
                           </div>
                           {diagnosticLogs.map((log, index) => (
@@ -922,7 +876,7 @@ service cloud.firestore {
                 {activeTab === 'matchmaker' && (
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-200">
                     <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl space-y-4">
-                      <h3 className="text-lg font-bold text-white">Lineup Ganda</h3>
+                      <h3 className="text-lg font-bold text-white">Lineup Tanding Ganda</h3>
                       <select value={dPlayer1} onChange={(e) => setDPlayer1(e.target.value)} className="w-full bg-gray-950 border border-gray-800 p-2.5 text-sm rounded-xl text-white focus:outline-none"><option value="">Pemain A1</option>{players.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
                       <select value={dPlayer2} onChange={(e) => setDPlayer2(e.target.value)} className="w-full bg-gray-950 border border-gray-800 p-2.5 text-sm rounded-xl text-white focus:outline-none"><option value="">Pemain A2</option>{players.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
                       <select value={dPlayer3} onChange={(e) => setDPlayer3(e.target.value)} className="w-full bg-gray-950 border border-gray-800 p-2.5 text-sm rounded-xl text-white focus:outline-none"><option value="">Pemain B1</option>{players.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
@@ -933,34 +887,32 @@ service cloud.firestore {
                     <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl text-center flex flex-col justify-between">
                       <div>
                         <h3 className="text-lg font-bold text-white">Papan Poin Live 21</h3>
-                        <p className="text-[11px] text-gray-400 mt-0.5">Gunakan tombol + dan - untuk mengubah nilai skor pertandingan</p>
+                        <p className="text-[11px] text-gray-400 mt-0.5">Ketuk tombol + dan - untuk mengubah skor</p>
                       </div>
                       
                       <div className="grid grid-cols-2 gap-4 my-6">
-                        {/* SCORE TEAM A */}
                         <div className="bg-indigo-950/40 p-3 rounded-2xl border border-indigo-900/60 flex flex-col items-center">
                           <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mb-2">TIM A</span>
                           <div className="text-4xl font-black text-white py-2">{scoreA}</div>
                           <div className="flex gap-2 w-full mt-2">
-                            <button onClick={() => { setScoreA(prev => Math.max(0, prev - 1)); triggerStateSync(); }} className="flex-1 py-2 rounded-xl bg-gray-800 hover:bg-gray-700 font-bold text-base text-gray-300 transition-all">-</button>
-                            <button onClick={() => { setScoreA(prev => prev + 1); triggerStateSync(); }} className="flex-1 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-bold text-base text-white transition-all">+</button>
+                            <button onClick={() => setScoreA(prev => Math.max(0, prev - 1))} className="flex-1 py-2 rounded-xl bg-gray-800 hover:bg-gray-700 font-bold text-base text-gray-300 transition-all">-</button>
+                            <button onClick={() => setScoreA(prev => prev + 1)} className="flex-1 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-bold text-base text-white transition-all">+</button>
                           </div>
                         </div>
 
-                        {/* SCORE TEAM B */}
                         <div className="bg-red-950/40 p-3 rounded-2xl border border-red-900/60 flex flex-col items-center">
                           <span className="text-[10px] font-bold text-red-400 uppercase tracking-wider mb-2">TIM B</span>
                           <div className="text-4xl font-black text-white py-2">{scoreB}</div>
                           <div className="flex gap-2 w-full mt-2">
-                            <button onClick={() => { setScoreB(prev => Math.max(0, prev - 1)); triggerStateSync(); }} className="flex-1 py-2 rounded-xl bg-gray-800 hover:bg-gray-700 font-bold text-base text-gray-300 transition-all">-</button>
-                            <button onClick={() => { setScoreB(prev => prev + 1); triggerStateSync(); }} className="flex-1 py-2 rounded-xl bg-red-600 hover:bg-red-500 font-bold text-base text-white transition-all">+</button>
+                            <button onClick={() => setScoreB(prev => Math.max(0, prev - 1))} className="flex-1 py-2 rounded-xl bg-gray-800 hover:bg-gray-700 font-bold text-base text-gray-300 transition-all">-</button>
+                            <button onClick={() => setScoreB(prev => prev + 1)} className="flex-1 py-2 rounded-xl bg-red-600 hover:bg-red-500 font-bold text-base text-white transition-all">+</button>
                           </div>
                         </div>
                       </div>
 
                       <div className="space-y-2">
                         <button onClick={saveMatchResult} className="w-full py-2.5 bg-emerald-500 font-bold text-gray-950 text-sm rounded-xl shadow-lg shadow-emerald-500/10 hover:bg-emerald-400 transition-all">Simpan &amp; Log Riwayat Game</button>
-                        <button onClick={() => { setScoreA(0); setScoreB(0); triggerStateSync(); }} className="w-full py-1.5 bg-gray-800 text-xs font-bold text-red-400 rounded-lg transition-all">Reset Score ke 0-0</button>
+                        <button onClick={() => { setScoreA(0); setScoreB(0); }} className="w-full py-1.5 bg-gray-800 text-xs font-bold text-red-400 rounded-lg transition-all">Reset Score ke 0-0</button>
                       </div>
                     </div>
 
@@ -978,24 +930,66 @@ service cloud.firestore {
 
                 {activeTab === 'ledger' && (
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-200">
-                    <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl h-fit">
+                    <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl h-fit space-y-4">
+                      <h3 className="text-base font-bold text-white">Catat Mutasi Kas Skuad</h3>
                       <form onSubmit={addTransaction} className="space-y-4">
                         <div className="grid grid-cols-2 gap-2">
-                          <button type="button" onClick={() => setTxType('credit')} className="py-1.5 rounded-lg text-xs font-bold border border-emerald-500 text-emerald-400">Iuran IN</button>
-                          <button type="button" onClick={() => setTxType('debit')} className="py-1.5 rounded-lg text-xs font-bold border border-gray-800 text-gray-400">Biaya OUT</button>
+                          <button type="button" onClick={() => setTxType('credit')} className={`py-1.5 rounded-lg text-xs font-bold border transition-all ${txType === 'credit' ? 'border-emerald-500 text-emerald-400 bg-emerald-950/20' : 'border-gray-800 text-gray-400'}`}>Uang Masuk</button>
+                          <button type="button" onClick={() => setTxType('debit')} className={`py-1.5 rounded-lg text-xs font-bold border transition-all ${txType === 'debit' ? 'border-red-500 text-red-400 bg-red-950/20' : 'border-gray-800 text-gray-400'}`}>Uang Keluar</button>
                         </div>
+                        
+                        {txType === 'credit' && (
+                          <div className="space-y-1">
+                            <label className="text-[10px] text-gray-400 font-bold uppercase">Pilih Anggota Pembayar (Opsional):</label>
+                            <select value={txPlayerId} onChange={(e) => setTxPlayerId(e.target.value)} className="w-full bg-gray-950 border border-gray-800 p-2 text-xs text-white rounded-xl">
+                              <option value="">-- Bukan Anggota Inti --</option>
+                              {players.map(p => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
                         <input type="number" value={txAmount} onChange={(e) => setTxAmount(e.target.value)} placeholder="Jumlah Rp" className="w-full bg-gray-950 border border-gray-800 p-2.5 text-xs text-white rounded-xl" />
-                        <input type="text" value={txDesc} onChange={(e) => setTxDesc(e.target.value)} placeholder="Keterangan Nota" className="w-full bg-gray-950 border border-gray-800 p-2.5 text-xs text-white rounded-xl" />
-                        <button type="submit" className="w-full py-2.5 bg-emerald-500 text-gray-950 font-bold text-xs rounded-xl hover:bg-emerald-400 transition-all">Simpan Jurnal Kas</button>
+                        <input type="text" value={txDesc} onChange={(e) => setTxDesc(e.target.value)} placeholder="Keterangan Nota/Deskripsi" className="w-full bg-gray-950 border border-gray-800 p-2.5 text-xs text-white rounded-xl" />
+                        
+                        {/* INPUT UPLOAD BUKTI SLIP NOTA DENGAN KOMPRESI BAWAAN */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] text-gray-400 font-bold uppercase">Lampirkan Bukti Slip / Foto Nota:</label>
+                          <label className="flex flex-col items-center justify-center p-3 border border-dashed border-gray-700 hover:border-gray-550 rounded-xl cursor-pointer transition-all bg-gray-950/40">
+                            <span className="text-xs text-gray-400 font-semibold">📸 Unggah File/Foto Baru</span>
+                            <input type="file" accept="image/*" onChange={handleSlipImageUpload} className="hidden" />
+                          </label>
+                          {txSlip && (
+                            <div className="relative inline-block mt-2">
+                              <img src={txSlip} className="w-20 h-20 rounded-xl object-cover border border-emerald-500" />
+                              <button type="button" onClick={() => setTxSlip(null)} className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold">✕</button>
+                            </div>
+                          )}
+                        </div>
+
+                        <button type="submit" className="w-full py-2.5 bg-emerald-500 text-gray-950 font-bold text-xs rounded-xl hover:bg-emerald-400 transition-all">Simpan Laporan Kas</button>
                       </form>
                     </div>
-                    <div className="lg:col-span-2 space-y-3 max-h-[500px] overflow-y-auto">
+                    
+                    <div className="lg:col-span-2 space-y-3 max-h-[500px] overflow-y-auto pr-1">
                       {transactions.map(t => (
                         <div key={t.id} className="p-4 bg-gray-900 border border-gray-800 rounded-xl flex justify-between items-center hover:bg-gray-900/40 transition-all">
-                          <div><span className="text-sm font-bold text-white block">{t.description}</span><span className="text-[10px] text-gray-400">{t.date}</span></div>
+                          <div className="flex items-center gap-3">
+                            {t.slip && (
+                              <button onClick={() => setSelectedSlip(t.slip)} className="w-10 h-10 rounded-lg overflow-hidden border border-gray-700 bg-gray-950 relative hover:border-emerald-500 transition-all group">
+                                <img src={t.slip} className="w-full h-full object-cover" />
+                                <span className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-[8px] font-bold text-white tracking-widest">BUKA</span>
+                              </button>
+                            )}
+                            <div>
+                              <span className="text-sm font-bold text-white block">{t.description}</span>
+                              <span className="text-[10px] text-gray-400">{t.date}</span>
+                            </div>
+                          </div>
                           <div className="flex items-center gap-2">
                             <span className={`text-sm font-black ${t.type === 'credit' ? 'text-emerald-400' : 'text-red-400'}`}>Rp {t.amount.toLocaleString('id-ID')}</span>
-                            <button onClick={() => removeTransaction(t.id)} className="text-red-500 text-xs px-1 hover:text-red-400 transition-all">✕</button>
+                            <button onClick={() => removeTransaction(t.id)} className="text-red-500 text-xs px-2 py-1 hover:bg-red-500/20 rounded transition-all">✕</button>
                           </div>
                         </div>
                       ))}
@@ -1007,13 +1001,23 @@ service cloud.firestore {
                   <div className="flex flex-col lg:flex-row gap-6 bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-xl items-center justify-center animate-in fade-in duration-200">
                     <div className="w-full lg:w-1/3 space-y-2">
                       <h3 className="text-base font-bold text-white">Strategi Court Planner</h3>
-                      <p className="text-xs text-gray-400">Geser titik lingkaran pemain untuk menyusun pola tanding tim ganda secara visual.</p>
-                      <button onClick={redrawCanvas} className="w-full mt-4 py-2 bg-red-950 border border-red-900 text-red-400 font-bold text-xs rounded-xl hover:bg-red-900 transition-all">Bersihkan Coretan Lapangan 🧹</button>
+                      <p className="text-xs text-gray-400">Geser titik lingkaran pemain untuk menyusun pola tanding tim ganda secara visual sebelum bermain.</p>
+                      <button onClick={redrawCanvas} className="w-full mt-4 py-2 bg-red-950 border border-red-900 text-red-400 font-bold text-xs rounded-xl hover:bg-red-900 transition-all">Copot Coretan Lapangan 🧹</button>
                     </div>
                     <canvas ref={canvasRef} width="300" height="400" onMouseDown={handleCanvasMouseDown} onMouseMove={handleCanvasMouseMove} onMouseUp={handleCanvasMouseUpOrLeave} onMouseLeave={handleCanvasMouseUpOrLeave} onTouchStart={handleCanvasTouchStart} onTouchMove={handleCanvasTouchMove} onTouchEnd={handleCanvasMouseUpOrLeave} className="border border-gray-800 rounded-2xl bg-emerald-950 touch-none shadow-2xl cursor-crosshair" />
                   </div>
                 )}
               </main>
+
+              {/* SLIP NOTA LIGHTBOX PREVIEW MODAL */}
+              {selectedSlip && (
+                <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex items-center justify-center p-4" onClick={() => setSelectedSlip(null)}>
+                  <div className="relative max-w-sm w-full bg-gray-900 border border-gray-800 rounded-3xl p-4 animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+                    <button onClick={() => setSelectedSlip(null)} className="absolute -top-3 -right-3 bg-red-600 text-white w-7 h-7 rounded-full flex items-center justify-center font-bold shadow-lg">✕</button>
+                    <img src={selectedSlip} alt="Nota" className="w-full h-auto rounded-xl object-contain bg-gray-950 max-h-[75vh]" />
+                  </div>
+                </div>
+              )}
             </div>
           );
         }
